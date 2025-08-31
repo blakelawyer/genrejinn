@@ -232,6 +232,33 @@ class EPUBReader(App):
         color: #fbdda7;
     }
     
+    #color-button {
+        color: #9aa4ca;
+        min-width: 11;
+        text-align: center;
+    }
+    
+    #color-button:focus {
+        background: #1f1f39 !important;
+        border: solid #9aa4ca !important;
+        outline: none !important;
+    }
+    
+    #color-button:hover {
+        background: #1f1f39;
+    }
+    
+    #prev:focus, #next:focus, #highlight:focus, #save-note:focus, #delete-highlight:focus {
+        background: #1f1f39 !important;
+        border: solid #9aa4ca !important;
+        outline: none !important;
+    }
+    
+    #prev:hover, #next:hover, #highlight:hover, #save-note:hover, #delete-highlight:hover {
+        background: #1f1f39;
+    }
+    
+    
     #highlight-controls {
         height: auto;
         border: solid #9aa4ca;
@@ -401,6 +428,14 @@ class EPUBReader(App):
         self.highlights = {}
         self.selected_highlight = None  # Track currently selected highlight for note editing
         self.last_focused_textarea = None  # Track the last focused TextArea for save/delete operations
+        # Color cycling for highlight button
+        self.current_color_index = 0
+        self.highlight_colors = [
+            ("Yellow", "#fbdda7"),
+            ("Red", "#ff6a6e"), 
+            ("Green", "#6be28d"),
+            ("Blue", "#b3e3f2")
+        ]
         # Load existing highlights
         self.load_highlights()
     
@@ -463,14 +498,33 @@ class EPUBReader(App):
                     yield text_area
                     with Vertical(id="left-controls"):
                         with Horizontal():
-                            yield Button("Back", id="prev")
+                            back_button = Button("Back", id="prev")
+                            back_button.can_focus = False
+                            back_button.active_effect_duration = 0
+                            yield back_button
                             yield ProgressBar(total=len(self.pages), show_percentage=False, show_eta=False, id="progress")
-                            yield Button("Next", id="next")
+                            next_button = Button("Next", id="next")
+                            next_button.can_focus = False
+                            next_button.active_effect_duration = 0
+                            yield next_button
                         yield Static(f"1 / {len(self.pages)}", id="counter")
                     with Horizontal(id="highlight-controls"):
-                        yield Button("Highlight", id="highlight")
-                        yield Button("Save", id="save-note")
-                        yield Button("Delete", id="delete-highlight")
+                        color_button = Button("Color", id="color-button")
+                        color_button.can_focus = False
+                        color_button.active_effect_duration = 0
+                        yield color_button
+                        highlight_button = Button("Highlight", id="highlight")
+                        highlight_button.can_focus = False
+                        highlight_button.active_effect_duration = 0
+                        yield highlight_button
+                        save_button = Button("Save", id="save-note")
+                        save_button.can_focus = False
+                        save_button.active_effect_duration = 0
+                        yield save_button
+                        delete_button = Button("Delete", id="delete-highlight")
+                        delete_button.can_focus = False
+                        delete_button.active_effect_duration = 0
+                        yield delete_button
                 with Vertical(id="notes-panel"):
                     yield Static("HIGHLIGHTS & NOTES", id="notes-title")
                     highlights_list = ListView(id="highlights-list")
@@ -490,6 +544,21 @@ class EPUBReader(App):
             self.save_focused_note()
         elif event.button.id == "delete-highlight":
             self.delete_focused_highlight()
+        elif event.button.id == "color-button":
+            self.cycle_color()
+    
+    def cycle_color(self) -> None:
+        """Cycle through colors and update the button appearance."""
+        # Move to next color
+        self.current_color_index = (self.current_color_index + 1) % len(self.highlight_colors)
+        color_name, color_hex = self.highlight_colors[self.current_color_index]
+        
+        # Update the button text and color
+        color_button = self.query_one("#color-button", Button)
+        color_button.label = color_name
+        color_button.styles.color = color_hex
+        
+        debug_log(f"Cycled to color: {color_name} ({color_hex})")
     
     def save_focused_note(self) -> None:
         """Save the note from the last focused TextArea."""
@@ -596,21 +665,6 @@ class EPUBReader(App):
             self.last_focused_textarea = event.widget
             debug_log(f"Tracked focused textarea: {event.widget.id}")
     
-    def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle color selection change for highlights."""
-        if event.select.id and event.select.id.startswith("color_select_"):
-            # Parse the select ID to get highlight coordinates
-            parts = event.select.id.split("_")
-            if len(parts) >= 5:  # color_select_{page_num}_{start_row}_{start_col}
-                page_num = int(parts[2])
-                start_row = int(parts[3])
-                start_col = int(parts[4])
-                new_color = event.value
-                
-                debug_log(f"Color changed for highlight at page {page_num}, row {start_row}, col {start_col} to {new_color}")
-                
-                # Update the highlight in memory and refresh display
-                self.update_highlight_color(page_num, start_row, start_col, new_color)
     
     def update_highlight_color(self, page_num: int, start_row: int, start_col: int, new_color: str):
         """Update the color of a specific highlight."""
@@ -925,6 +979,7 @@ class EPUBReader(App):
             debug_log("Forced ListView background override after mounting")
         except Exception as e:
             debug_log(f"Could not override ListView background: {e}")
+        
         
 
 
