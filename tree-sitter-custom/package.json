@@ -1,0 +1,20 @@
+{
+  "name": "tree-sitter-custom",
+  "version": "1.0.0",
+  "description": "Custom tree-sitter grammar for EPUB reader highlighting",
+  "main": "bindings/node",
+  "tree-sitter": [
+    {
+      "scope": "source.custom",
+      "file-types": [
+        "custom"
+      ],
+      "highlights": [
+        "queries/highlights.scm"
+      ]
+    }
+  ],
+  "dependencies": {
+    "tree-sitter-cli": "^0.25.8"
+  }
+}

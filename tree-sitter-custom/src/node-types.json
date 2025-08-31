@@ -1,0 +1,185 @@
+[
+  {
+    "type": "blue_highlight",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "blue_content",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "green_highlight",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "green_content",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "red_highlight",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "red_content",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "source_file",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "blue_highlight",
+          "named": true
+        },
+        {
+          "type": "green_highlight",
+          "named": true
+        },
+        {
+          "type": "newline",
+          "named": true
+        },
+        {
+          "type": "red_highlight",
+          "named": true
+        },
+        {
+          "type": "text",
+          "named": true
+        },
+        {
+          "type": "white_highlight",
+          "named": true
+        },
+        {
+          "type": "yellow_highlight",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "white_highlight",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "white_content",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "yellow_highlight",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "yellow_content",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "<",
+    "named": false
+  },
+  {
+    "type": ">",
+    "named": false
+  },
+  {
+    "type": "[",
+    "named": false
+  },
+  {
+    "type": "]",
+    "named": false
+  },
+  {
+    "type": "blue_content",
+    "named": true
+  },
+  {
+    "type": "green_content",
+    "named": true
+  },
+  {
+    "type": "newline",
+    "named": true
+  },
+  {
+    "type": "red_content",
+    "named": true
+  },
+  {
+    "type": "text",
+    "named": true
+  },
+  {
+    "type": "white_content",
+    "named": true
+  },
+  {
+    "type": "yellow_content",
+    "named": true
+  },
+  {
+    "type": "{",
+    "named": false
+  },
+  {
+    "type": "}",
+    "named": false
+  },
+  {
+    "type": "«",
+    "named": false
+  },
+  {
+    "type": "»",
+    "named": false
+  },
+  {
+    "type": "⟨",
+    "named": false
+  },
+  {
+    "type": "⟩",
+    "named": false
+  }
+]

@@ -1,0 +1,171 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/grammar.schema.json",
+  "name": "custom",
+  "rules": {
+    "source_file": {
+      "type": "REPEAT",
+      "content": {
+        "type": "SYMBOL",
+        "name": "_item"
+      }
+    },
+    "_item": {
+      "type": "CHOICE",
+      "members": [
+        {
+          "type": "SYMBOL",
+          "name": "text"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "yellow_highlight"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "green_highlight"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "red_highlight"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "blue_highlight"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "white_highlight"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "newline"
+        }
+      ]
+    },
+    "text": {
+      "type": "PATTERN",
+      "value": "[^\\n\\[\\]{}<>«»⟨⟩]+"
+    },
+    "yellow_highlight": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "["
+        },
+        {
+          "type": "SYMBOL",
+          "name": "yellow_content"
+        },
+        {
+          "type": "STRING",
+          "value": "]"
+        }
+      ]
+    },
+    "green_highlight": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "green_content"
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        }
+      ]
+    },
+    "red_highlight": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "<"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "red_content"
+        },
+        {
+          "type": "STRING",
+          "value": ">"
+        }
+      ]
+    },
+    "blue_highlight": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "«"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "blue_content"
+        },
+        {
+          "type": "STRING",
+          "value": "»"
+        }
+      ]
+    },
+    "white_highlight": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "⟨"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "white_content"
+        },
+        {
+          "type": "STRING",
+          "value": "⟩"
+        }
+      ]
+    },
+    "yellow_content": {
+      "type": "PATTERN",
+      "value": "[^\\]]+"
+    },
+    "green_content": {
+      "type": "PATTERN",
+      "value": "[^}]+"
+    },
+    "red_content": {
+      "type": "PATTERN",
+      "value": "[^>]+"
+    },
+    "blue_content": {
+      "type": "PATTERN",
+      "value": "[^»]+"
+    },
+    "white_content": {
+      "type": "PATTERN",
+      "value": "[^⟩]+"
+    },
+    "newline": {
+      "type": "STRING",
+      "value": "\n"
+    }
+  },
+  "extras": [
+    {
+      "type": "PATTERN",
+      "value": "\\s"
+    }
+  ],
+  "conflicts": [],
+  "precedences": [],
+  "externals": [],
+  "inline": [],
+  "supertypes": [],
+  "reserved": {}
+}
