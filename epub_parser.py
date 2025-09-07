@@ -631,9 +631,8 @@ class EPUBReader(App):
         image_data = []  # List of (url, filepath) tuples
         processed_text = note_text
         
-        # Check if we're running in server mode (via command line args)
-        import sys
-        is_server_mode = '--server' in sys.argv
+        # Check if we're running in server mode (via environment variable)
+        is_server_mode = os.environ.get('GENREJINN_SERVER_MODE') == '1'
         
         for url in image_urls:
             filepath = self.download_image(url)
@@ -1523,8 +1522,7 @@ class EPUBReader(App):
             return image_widgets
         
         # Check if we're in server mode
-        import sys
-        is_server_mode = '--server' in sys.argv
+        is_server_mode = os.environ.get('GENREJINN_SERVER_MODE') == '1'
         
         if is_server_mode:
             # In server mode, don't create image widgets since we want to keep URLs visible
@@ -1921,6 +1919,9 @@ def run_server_mode(host, port, public_url=None):
     print(f"Starting GenreJinn server on {host}:{port}")
     if public_url:
         print(f"Public URL: {public_url}")
+    
+    # Set environment variable that the subprocess can detect
+    os.environ['GENREJINN_SERVER_MODE'] = '1'
     
     # Create server with current script as command
     import sys
