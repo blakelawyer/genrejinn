@@ -73,72 +73,10 @@ class ClickableImage(Vertical):
     def on_click(self, event: Click) -> None:
         """Open the image URL in browser when clicked."""
         debug_log(f"Image clicked, opening URL: {self.image_url}")
-        
-        # For remote server mode, we need a different approach
-        if os.environ.get('TEXTUAL_SERVER_MODE'):
-            debug_log("Running in server mode, attempting browser redirect")
-            self._open_url_server_mode(self.image_url)
-        else:
-            # Local mode - use webbrowser
-            try:
-                webbrowser.open(self.image_url)
-            except Exception as e:
-                debug_log(f"Error opening URL: {e}")
-    
-    def _open_url_server_mode(self, url: str) -> None:
-        """Open URL in server mode using nginx-served images directory."""
         try:
-            debug_log(f"Creating nginx-served URL for: {url}")
-            
-            # Get the local image filename
-            local_image_path = self._get_local_image_path(url)
-            if local_image_path and os.path.exists(local_image_path):
-                # Create URL pointing to nginx-served images directory
-                filename = os.path.basename(local_image_path)
-                base_url = os.environ.get('TEXTUAL_PUBLIC_URL', 'http://localhost:8000')
-                
-                # Create nginx URL for the image
-                nginx_url = f"{base_url}/images/{filename}"
-                debug_log(f"Created nginx URL: {nginx_url}")
-                
-                # Try to open the nginx URL
-                try:
-                    webbrowser.open(nginx_url)
-                    debug_log(f"Opened nginx URL: {nginx_url}")
-                except Exception as e:
-                    debug_log(f"Failed to open nginx URL: {e}")
-                    # Fallback: print the nginx URL
-                    print(f"\nIMAGE NGINX URL: {nginx_url}", flush=True)
-            else:
-                debug_log(f"Local image not found, falling back to original URL")
-                # Fallback to original URL
-                print(f"\nIMAGE URL: {url}", flush=True)
-                try:
-                    webbrowser.open(url)
-                except:
-                    pass
-                
+            webbrowser.open(self.image_url)
         except Exception as e:
-            debug_log(f"Server mode nginx URL creation failed: {e}")
-            print(f"Manual URL to copy/paste: {url}", flush=True)
-    
-    def _get_local_image_path(self, url: str) -> str:
-        """Get the local file path for a downloaded image URL."""
-        try:
-            # Extract filename from URL
-            parsed_url = urllib.parse.urlparse(url)
-            filename = os.path.basename(parsed_url.path)
-            
-            # If no filename, generate one based on URL hash
-            if not filename or '.' not in filename:
-                filename = f"image_{hash(url) % 10000}.jpg"
-            
-            local_path = Path("images") / filename
-            return str(local_path) if local_path.exists() else None
-            
-        except Exception as e:
-            debug_log(f"Error getting local image path: {e}")
-            return None
+            debug_log(f"Error opening URL: {e}")
     
 
 # Color management system
@@ -693,15 +631,26 @@ class EPUBReader(App):
         image_data = []  # List of (url, filepath) tuples
         processed_text = note_text
         
+        # Check if we're running in server mode (via command line args)
+        import sys
+        is_server_mode = '--server' in sys.argv
+        
         for url in image_urls:
             filepath = self.download_image(url)
             if filepath:
                 image_data.append((url, filepath))
-                # Replace the URL with empty string to hide it
-                processed_text = processed_text.replace(url, "")
+                
+                if is_server_mode:
+                    # In server mode, convert URL to a hyperlink using rich markup
+                    hyperlink = f"[link={url}]{url}[/link]"
+                    processed_text = processed_text.replace(url, hyperlink)
+                else:
+                    # In local mode, hide the URL (original behavior)
+                    processed_text = processed_text.replace(url, "")
         
-        # Clean up extra whitespace
-        processed_text = re.sub(r'\s+', ' ', processed_text).strip()
+        # Clean up extra whitespace only if URLs were removed (local mode)
+        if not is_server_mode:
+            processed_text = re.sub(r'\s+', ' ', processed_text).strip()
         
         return processed_text, image_data
     
@@ -1576,9 +1525,20 @@ class EPUBReader(App):
         if note:
             processed_note_text, _ = self.process_note_for_images(note)
         
-        # Create vertical layout with display text and editable textarea for note
+        # Always create the editable TextArea
+        # For server mode, we'll strip hyperlink markup for editing
+        import sys
+        is_server_mode = '--server' in sys.argv
+        
+        # Clean text for TextArea (remove markup)
+        clean_text_for_editing = processed_note_text
+        if is_server_mode and '[link=' in processed_note_text:
+            # Remove markup but keep URLs visible
+            import re
+            clean_text_for_editing = re.sub(r'\[link=([^\]]+)\]([^\[]+)\[/link\]', r'\2', processed_note_text)
+        
         note_area = TextArea(
-            text=processed_note_text,
+            text=clean_text_for_editing,
             id=f"note_{page_num}_{start_row}_{start_col}",
             read_only=False
         )
@@ -1587,8 +1547,23 @@ class EPUBReader(App):
         # Process images and get the widgets to insert above the note
         image_widgets = self._get_image_widgets_for_note(note if note else "")
         
-        # Create content layout: just label and textarea (no images)
+        # Create content layout
         content_widgets = [Label(display_text), note_area]
+        
+        # In server mode, add a clickable hyperlink display below the TextArea
+        if is_server_mode and processed_note_text and '[link=' in processed_note_text:
+            from textual.widgets import Static as RichStatic
+            hyperlink_display = RichStatic(
+                processed_note_text,
+                markup=True,
+                id=f"hyperlinks_{page_num}_{start_row}_{start_col}"
+            )
+            hyperlink_display.styles.margin = (1, 0, 0, 0)
+            hyperlink_display.styles.padding = 1
+            hyperlink_display.styles.background = "#2f2f49"
+            hyperlink_display.styles.color = "#b3e3f2"
+            hyperlink_display.styles.border = ("solid", "#9aa4ca")
+            content_widgets.append(hyperlink_display)
         
         content = Vertical(*content_widgets)
         highlight_item = ListItem(content)
@@ -2020,11 +1995,6 @@ def run_server_mode(host, port, public_url=None):
     print(f"Starting GenreJinn server on {host}:{port}")
     if public_url:
         print(f"Public URL: {public_url}")
-    
-    # Set environment variables to indicate server mode
-    os.environ['TEXTUAL_SERVER_MODE'] = '1'
-    if public_url:
-        os.environ['TEXTUAL_PUBLIC_URL'] = public_url
     
     # Create server with current script as command
     import sys
