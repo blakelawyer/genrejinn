@@ -8,6 +8,7 @@ import os
 import urllib.request
 import urllib.parse
 import requests
+import argparse
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, Center, Middle
@@ -32,6 +33,13 @@ from textual.reactive import reactive
 from textual.events import Click
 import webbrowser
 from syntax.manager import tree_sitter_language
+
+# Try to import textual-serve for server mode
+try:
+    from textual_serve.server import Server
+    TEXTUAL_SERVE_AVAILABLE = True
+except ImportError:
+    TEXTUAL_SERVE_AVAILABLE = False
 # Debug logging function
 def debug_log(message):
     with open('log.txt', 'a') as f:
@@ -1925,6 +1933,46 @@ class EPUBReader(App):
         
 
 
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description='GenreJinn EPUB Reader')
+    parser.add_argument('--server', action='store_true', 
+                       help='Run in server mode for web browser access')
+    parser.add_argument('--host', default='127.0.0.1',
+                       help='Host address for server mode (default: 127.0.0.1)')
+    parser.add_argument('--port', type=int, default=8000,
+                       help='Port for server mode (default: 8000)')
+    parser.add_argument('--public-url', 
+                       help='Public URL for server mode (e.g., https://blakelawyer.dev/genrejinn)')
+    return parser.parse_args()
+
+def run_server_mode(host, port, public_url=None):
+    """Run the application in server mode using textual-serve."""
+    if not TEXTUAL_SERVE_AVAILABLE:
+        print("Error: textual-serve is not installed. Install it with: pip install textual-serve")
+        return
+    
+    print(f"Starting GenreJinn server on {host}:{port}")
+    if public_url:
+        print(f"Public URL: {public_url}")
+    
+    # Create server with current script as command
+    import sys
+    server = Server(
+        command=f'python {sys.argv[0]}',
+        host=host,
+        port=port,
+        public_url=public_url
+    )
+    server.serve()
+
 if __name__ == "__main__":
-    app = EPUBReader()
-    app.run()
+    args = parse_arguments()
+    
+    if args.server:
+        # Run in server mode
+        run_server_mode(args.host, args.port, args.public_url)
+    else:
+        # Run locally
+        app = EPUBReader()
+        app.run()
