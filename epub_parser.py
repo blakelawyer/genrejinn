@@ -71,10 +71,55 @@ class ClickableImage(Vertical):
     def on_click(self, event: Click) -> None:
         """Open the image URL in browser when clicked."""
         debug_log(f"Image clicked, opening URL: {self.image_url}")
+        
+        # For remote server mode, we need a different approach
+        if os.environ.get('TEXTUAL_SERVER_MODE'):
+            debug_log("Running in server mode, attempting browser redirect")
+            self._open_url_server_mode(self.image_url)
+        else:
+            # Local mode - use webbrowser
+            try:
+                webbrowser.open(self.image_url)
+            except Exception as e:
+                debug_log(f"Error opening URL: {e}")
+    
+    def _open_url_server_mode(self, url: str) -> None:
+        """Open URL in server mode using textual's hyperlink system."""
         try:
-            webbrowser.open(self.image_url)
+            debug_log(f"Attempting to open URL in server mode: {url}")
+            
+            # Use textual's hyperlink system - this should work in browser mode
+            from textual._hyperlink import Hyperlink
+            from textual.app import App
+            
+            # Try to create a hyperlink action that the browser can handle
+            app = self.app
+            if hasattr(app, '_driver') and hasattr(app._driver, '_terminal'):
+                terminal = app._driver._terminal
+                if hasattr(terminal, 'write'):
+                    # Send hyperlink escape sequence
+                    hyperlink_start = f'\033]8;;{url}\033\\'
+                    hyperlink_end = '\033]8;;\033\\'
+                    terminal.write(f"{hyperlink_start}Opening image...{hyperlink_end}\n")
+                    debug_log("Sent hyperlink escape sequence")
+            
+            # Alternative: Try to use the app's bell/notification system to get attention
+            # then display the URL prominently
+            app.bell()  # Audio notification if supported
+            
+            # Display the URL in the debug log and stdout for user awareness
+            debug_log(f"Image URL (click to open): {url}")
+            
+            # Last resort: still try webbrowser in case server has display forwarding
+            try:
+                webbrowser.open(url)
+            except:
+                pass
+                
         except Exception as e:
-            debug_log(f"Error opening URL: {e}")
+            debug_log(f"Server mode URL opening failed: {e}")
+            # Show URL to user as fallback
+            debug_log(f"Manual URL: {url}")
 
 # Color management system
 
@@ -1955,6 +2000,11 @@ def run_server_mode(host, port, public_url=None):
     print(f"Starting GenreJinn server on {host}:{port}")
     if public_url:
         print(f"Public URL: {public_url}")
+    
+    # Set environment variables to indicate server mode
+    os.environ['TEXTUAL_SERVER_MODE'] = '1'
+    if public_url:
+        os.environ['TEXTUAL_PUBLIC_URL'] = public_url
     
     # Create server with current script as command
     import sys
