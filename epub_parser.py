@@ -1525,9 +1525,8 @@ class EPUBReader(App):
         is_server_mode = os.environ.get('GENREJINN_SERVER_MODE') == '1'
         
         if is_server_mode:
-            # In server mode, don't create image widgets since we want to keep URLs visible
-            debug_log("Server mode: not creating image widgets to preserve URLs")
-            return image_widgets
+            # In server mode, we still want to show images, but we've already preserved URLs in the text
+            debug_log("Server mode: creating image widgets while preserving URLs in text")
             
         debug_log(f"Processing images for note: {note_text[:100]}...")
         processed_text, image_data = self.process_note_for_images(note_text)
