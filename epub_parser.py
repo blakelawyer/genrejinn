@@ -1549,6 +1549,15 @@ class EPUBReader(App):
         
         if not note_text:
             return image_widgets
+        
+        # Check if we're in server mode
+        import sys
+        is_server_mode = '--server' in sys.argv
+        
+        if is_server_mode:
+            # In server mode, don't create image widgets since we want to keep URLs visible
+            debug_log("Server mode: not creating image widgets to preserve URLs")
+            return image_widgets
             
         debug_log(f"Processing images for note: {note_text[:100]}...")
         processed_text, image_data = self.process_note_for_images(note_text)
