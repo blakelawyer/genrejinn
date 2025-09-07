@@ -84,42 +84,55 @@ class ClickableImage(Vertical):
                 debug_log(f"Error opening URL: {e}")
     
     def _open_url_server_mode(self, url: str) -> None:
-        """Open URL in server mode using textual's hyperlink system."""
+        """Open URL in server mode by writing URL to stdout and using notification."""
         try:
             debug_log(f"Attempting to open URL in server mode: {url}")
             
-            # Use textual's hyperlink system - this should work in browser mode
-            from textual._hyperlink import Hyperlink
-            from textual.app import App
+            # Method 1: Write URL to stdout which might be captured by textual-serve
+            print(f"\nIMAGE URL: {url}", flush=True)
             
-            # Try to create a hyperlink action that the browser can handle
+            # Method 2: Try to get the app to show a notification or message
             app = self.app
-            if hasattr(app, '_driver') and hasattr(app._driver, '_terminal'):
-                terminal = app._driver._terminal
-                if hasattr(terminal, 'write'):
-                    # Send hyperlink escape sequence
-                    hyperlink_start = f'\033]8;;{url}\033\\'
-                    hyperlink_end = '\033]8;;\033\\'
-                    terminal.write(f"{hyperlink_start}Opening image...{hyperlink_end}\n")
-                    debug_log("Sent hyperlink escape sequence")
-            
-            # Alternative: Try to use the app's bell/notification system to get attention
-            # then display the URL prominently
-            app.bell()  # Audio notification if supported
-            
-            # Display the URL in the debug log and stdout for user awareness
-            debug_log(f"Image URL (click to open): {url}")
-            
-            # Last resort: still try webbrowser in case server has display forwarding
             try:
-                webbrowser.open(url)
+                app.bell()  # Audio notification if supported
+                debug_log("Bell notification sent")
             except:
                 pass
+            
+            # Method 3: Try terminal hyperlink escape sequences
+            try:
+                if hasattr(app, '_driver'):
+                    # Send hyperlink escape sequence directly to stdout
+                    hyperlink = f'\033]8;;{url}\033\\🔗 Open Image\033]8;;\033\\'
+                    print(hyperlink, flush=True)
+                    debug_log("Sent hyperlink escape sequence to stdout")
+            except Exception as e:
+                debug_log(f"Hyperlink escape sequence failed: {e}")
+            
+            # Method 4: Create a temporary notification in the app
+            try:
+                # Try to push a message to the app that might show the URL
+                from textual.message import Message
+                class URLMessage(Message):
+                    def __init__(self, url: str):
+                        self.url = url
+                        super().__init__()
+                
+                app.post_message(URLMessage(url))
+                debug_log("Posted URL message to app")
+            except Exception as e:
+                debug_log(f"URL message posting failed: {e}")
+            
+            # Method 5: Try webbrowser as final fallback
+            try:
+                webbrowser.open(url)
+                debug_log("webbrowser.open() called as fallback")
+            except Exception as e:
+                debug_log(f"webbrowser.open() failed: {e}")
                 
         except Exception as e:
-            debug_log(f"Server mode URL opening failed: {e}")
-            # Show URL to user as fallback
-            debug_log(f"Manual URL: {url}")
+            debug_log(f"All server mode URL opening methods failed: {e}")
+            print(f"Manual URL to copy/paste: {url}", flush=True)
 
 # Color management system
 
