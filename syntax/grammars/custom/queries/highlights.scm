@@ -20,5 +20,4 @@
 
 (white_highlight) @highlight.white
 (white_content) @highlight.white.content
-"⟨" @highlight.white.bracket
-"⟩" @highlight.white.bracket
+"|" @highlight.white.bracket

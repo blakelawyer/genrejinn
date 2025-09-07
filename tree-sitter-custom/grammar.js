@@ -14,7 +14,7 @@ module.exports = grammar({
       $.newline
     ),
 
-    text: $ => /[^\n\[\]{}<>«»⟨⟩]+/,
+    text: $ => /[^\n\[\]{}<>«»|]+/,
     
     yellow_highlight: $ => seq(
       '[',
@@ -41,16 +41,16 @@ module.exports = grammar({
     ),
     
     white_highlight: $ => seq(
-      '⟨',
+      '|',
       $.white_content,
-      '⟩'
+      '|'
     ),
     
     yellow_content: $ => /[^\]]+/,
     green_content: $ => /[^}]+/,
     red_content: $ => /[^>]+/,
     blue_content: $ => /[^»]+/,
-    white_content: $ => /[^⟩]+/,
+    white_content: $ => /[^|]+/,
     
     newline: $ => '\n'
   }

@@ -44,7 +44,7 @@
     },
     "text": {
       "type": "PATTERN",
-      "value": "[^\\n\\[\\]{}<>«»⟨⟩]+"
+      "value": "[^\\n\\[\\]{}<>«»|]+"
     },
     "yellow_highlight": {
       "type": "SEQ",
@@ -119,7 +119,7 @@
       "members": [
         {
           "type": "STRING",
-          "value": "⟨"
+          "value": "|"
         },
         {
           "type": "SYMBOL",
@@ -127,7 +127,7 @@
         },
         {
           "type": "STRING",
-          "value": "⟩"
+          "value": "|"
         }
       ]
     },
@@ -149,7 +149,7 @@
     },
     "white_content": {
       "type": "PATTERN",
-      "value": "[^⟩]+"
+      "value": "[^|]+"
     },
     "newline": {
       "type": "STRING",

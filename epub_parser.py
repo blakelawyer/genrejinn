@@ -5,10 +5,27 @@ import zipfile
 import re
 import pickle
 import os
+import urllib.request
+import urllib.parse
+import requests
+from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, Center, Middle
 from textual.screen import Screen
 from textual.widgets import Button, Static, TextArea, ProgressBar, ListView, ListItem, Label, OptionList, Input
+
+# Try to import textual-image for image display
+try:
+    from textual_image.widget import Image as TextualImage
+    TEXTUAL_IMAGE_AVAILABLE = True
+except ImportError:
+    TEXTUAL_IMAGE_AVAILABLE = False
+
+try:
+    from textual_imageview import ImageViewer
+    IMAGEVIEW_AVAILABLE = True
+except ImportError:
+    IMAGEVIEW_AVAILABLE = False
 from textual.widgets.text_area import TextAreaTheme
 from rich.style import Style
 from textual.reactive import reactive
@@ -39,7 +56,7 @@ class ColorManager:
         "green": ("{", "}"),
         "red": ("<", ">"),
         "blue": ("«", "»"),
-        "white": ("⟨", "⟩")
+        "white": ("|", "|")
     }
     
     # Color hex values for display
@@ -114,7 +131,7 @@ class EPUBReader(App):
     }
     
     #left-panel {
-        width: 60%;
+        width: 50%;
     }
     
     
@@ -138,12 +155,12 @@ class EPUBReader(App):
     }
     
     #notes-panel {
+        width: 50%;
         margin: 1;
         padding: 1;
         border: solid #9aa4ca;
         background: #1f1f39;
         color: #ffffff;
-        width: 40%;
         height: 100%;
     }
     
@@ -175,6 +192,13 @@ class EPUBReader(App):
     
     ListItem:hover {
         background: #2f2f49;
+    }
+    
+    /* Mark items without borders */
+    ListItem.mark-item {
+        border: none;
+        padding: 0;
+        margin: 0;
     }
     
     ListItem > Label {
@@ -306,6 +330,7 @@ class EPUBReader(App):
         color: #ffffff;
         text-style: bold;
     }
+    
     
     
     ProgressBar {
@@ -455,6 +480,23 @@ class EPUBReader(App):
         margin-bottom: 1;
     }
     
+    /* Image widget styling for ListView items */
+    .note-image {
+        height: auto;
+        max-height: 25;
+        width: 100%;
+        margin: 1 0;
+        align: center middle;
+    }
+    
+    /* Remove borders from ListItems containing images */
+    ListView ListItem.image-container {
+        border: none;
+        padding: 0;
+        margin: 0;
+        background: #1f1f39;
+    }
+    
     """
     
     current_page = reactive(0)
@@ -465,6 +507,9 @@ class EPUBReader(App):
         # Store highlights as {page_number: [(start_pos, end_pos, text, note, color), ...]}
         self.highlights = {}
         self.last_focused_textarea = None  # Track the last focused TextArea for save/delete operations
+        self.last_clicked_mark = None  # Track the last clicked mark for delete operations
+        self.last_interaction_type = None  # 'note' or 'mark' to track which was interacted with last
+        self.mark_dropdown_states = {}  # Track which marks are expanded (True) or collapsed (False)
         # Color cycling for highlight button
         self.current_color_index = 0
         self.highlight_colors = [
@@ -480,6 +525,126 @@ class EPUBReader(App):
         self.marks = []  # List of (page_num, start_row, start_col, mark_text, mark_name, timestamp)
         # Load existing highlights
         self.load_highlights()
+    
+    def download_image(self, url: str) -> str:
+        """Download image from URL to images directory and return filepath."""
+        try:
+            # Create images directory if it doesn't exist
+            images_dir = Path("images")
+            images_dir.mkdir(exist_ok=True)
+            
+            # Get filename from URL
+            parsed_url = urllib.parse.urlparse(url)
+            filename = os.path.basename(parsed_url.path)
+            
+            # If no filename, generate one
+            if not filename or '.' not in filename:
+                filename = f"image_{hash(url) % 10000}.jpg"
+            
+            filepath = images_dir / filename
+            
+            # Check if already downloaded
+            if filepath.exists():
+                return str(filepath)
+            
+            # Download the image with proper headers
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+            }
+            response = requests.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            
+            # Save to file
+            with open(filepath, 'wb') as f:
+                f.write(response.content)
+            
+            return str(filepath)
+            
+        except Exception as e:
+            debug_log(f"Image download failed: {e}")
+            return None
+    
+    def process_note_for_images(self, note_text: str) -> tuple:
+        """Process note text to find and download image URLs, return (processed_text, image_paths)."""
+        # Pattern to find URLs ending in .jpg or .png
+        image_pattern = r'https?://[^\s]+\.(?:jpg|png)(?:\?[^\s]*)?'
+        
+        image_urls = re.findall(image_pattern, note_text, re.IGNORECASE)
+        image_paths = []
+        processed_text = note_text
+        
+        for url in image_urls:
+            filepath = self.download_image(url)
+            if filepath:
+                image_paths.append(filepath)
+                # Replace the URL with empty string to hide it
+                processed_text = processed_text.replace(url, "")
+        
+        # Clean up extra whitespace
+        processed_text = re.sub(r'\s+', ' ', processed_text).strip()
+        
+        return processed_text, image_paths
+    
+    def _process_note_images(self, note_text: str) -> list:
+        """Process note text for images and return list of image widgets."""
+        image_widgets = []
+        
+        if not note_text:
+            debug_log("No note text provided for image processing")
+            return image_widgets
+            
+        processed_text, image_paths = self.process_note_for_images(note_text)
+        debug_log(f"Found {len(image_paths)} image paths: {image_paths}")
+        
+        # Create image widgets for each downloaded image
+        for image_path in image_paths:
+            try:
+                if TEXTUAL_IMAGE_AVAILABLE:
+                    debug_log(f"Creating TextualImage widget for {image_path}")
+                    image_widget = TextualImage(image_path)
+                    image_widgets.append(image_widget)
+                    debug_log(f"Successfully created TextualImage widget")
+                elif IMAGEVIEW_AVAILABLE:
+                    debug_log(f"Creating ImageViewer widget for {image_path}")
+                    image_widget = ImageViewer(image_path) 
+                    image_widgets.append(image_widget)
+                    debug_log(f"Successfully created ImageViewer widget")
+                else:
+                    debug_log("No image display libraries available")
+            except Exception as e:
+                debug_log(f"Failed to create image widget for {image_path}: {e}")
+        
+        debug_log(f"Returning {len(image_widgets)} image widgets")
+        return image_widgets
+    
+    def _reconstruct_note_with_urls(self, page_num: int, start_row: int, start_col: int, processed_text: str) -> str:
+        """Reconstruct the original note with URLs from the existing highlight data."""
+        # Find the existing highlight to get the original note text
+        if page_num in self.highlights:
+            for highlight in self.highlights[page_num]:
+                start_pos, end_pos, text, original_note, color = parse_highlight_tuple(highlight)
+                if start_pos == (start_row, start_col):
+                    # Check if original note has URLs that were processed out
+                    if original_note:
+                        _, original_image_paths = self.process_note_for_images(original_note)
+                        if original_image_paths:
+                            # The processed text might be missing URLs, keep the original URLs
+                            # But allow other text to be updated
+                            image_pattern = r'https?://[^\s]+\.(?:jpg|png)(?:\?[^\s]*)?'
+                            original_urls = re.findall(image_pattern, original_note, re.IGNORECASE)
+                            # If we have URLs in original but processed text is different, 
+                            # append URLs to the new text
+                            if original_urls and processed_text != original_note:
+                                return f"{processed_text} {' '.join(original_urls)}"
+                    break
+        
+        # No existing URLs found, return processed text as-is
+        return processed_text
     
     def _load_epub_paragraphs(self, epub_path: str = 'bookshelf/gravitys-rainbow.epub') -> list:
         """Load paragraphs from EPUB file."""
@@ -581,6 +746,11 @@ class EPUBReader(App):
                             "highlight.blue": Style(color="#b3e3f2", bold=True),
                             "highlight.blue.content": Style(color="#b3e3f2", bold=True),
                             "highlight.blue.bracket": Style(color="#b3e3f2", bold=True),
+                            
+                            # White highlights (Akira white) - |text|
+                            "highlight.white": Style(color="#ffffff", bold=True),
+                            "highlight.white.content": Style(color="#ffffff", bold=True),
+                            "highlight.white.bracket": Style(color="#ffffff", bold=True),
                         }
                     )
                     
@@ -642,14 +812,6 @@ class EPUBReader(App):
                     yield mark_input
                     
                     
-                    # Add test mark dropdown
-                    test_mark_button = Button("TEST MARK ▼", id="test-mark-dropdown")
-                    test_mark_button.can_focus = False
-                    test_mark_button.active_effect_duration = 0
-                    test_mark_button.styles.color = "#ffffff"
-                    test_mark_button.styles.width = "100%"
-                    test_mark_button.styles.text_align = "left"
-                    yield test_mark_button
                     
                     highlights_list = ListView(id="highlights-list")
                     highlights_list.styles.background = "#1f1f39"
@@ -661,10 +823,17 @@ class EPUBReader(App):
         # Add visual feedback to all buttons
         self._add_button_press_feedback(event.button)
         
+        # Track mark button clicks for delete functionality
+        if event.button.id and event.button.id.startswith("mark-"):
+            # Extract mark info from button ID and track it
+            self._track_mark_click(event.button.id)
+        
         if event.button.id == "next" and self.current_page < len(self.pages) - 1:
             self.current_page += 1
+            self.save_current_page()  # Save page whenever it changes
         elif event.button.id == "prev" and self.current_page > 0:
             self.current_page -= 1
+            self.save_current_page()  # Save page whenever it changes
         elif event.button.id == "mark":
             self.create_simple_mark()
         elif event.button.id == "highlight":
@@ -679,8 +848,6 @@ class EPUBReader(App):
             self.delete_focused_highlight()
         elif event.button.id == "color-button":
             self.cycle_color()
-        elif event.button.id == "test-mark-dropdown":
-            self.toggle_test_mark_dropdown()
     
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle Enter key in input fields."""
@@ -784,6 +951,10 @@ class EPUBReader(App):
         mark_data = (page_num, start_row, start_col, selected_text, mark_name, timestamp)
         self.marks.append(mark_data)
         
+        # Initialize new mark as collapsed (False)
+        mark_key = self._get_mark_key(mark_data)
+        self.mark_dropdown_states[mark_key] = False
+        
         # Save marks to file
         self.save_marks()
         
@@ -797,6 +968,9 @@ class EPUBReader(App):
         text_area = self.query_one("#text-area", TextArea)
         from textual.widgets.text_area import Selection
         text_area.selection = Selection(text_area.selection.end, text_area.selection.end)
+        
+        # Update the highlights list to show the new mark
+        self.update_highlights_list()
         
         # Clear pending mark
         del self._pending_mark
@@ -814,27 +988,28 @@ class EPUBReader(App):
         
         debug_log(f"Cycled to color: {color_name} ({color_hex})")
     
-    def toggle_test_mark_dropdown(self) -> None:
-        """Toggle the test mark dropdown to show/hide all highlights."""
-        highlights_list = self.query_one("#highlights-list", ListView)
-        test_mark_button = self.query_one("#test-mark-dropdown", Button)
-        
-        # Check current visibility state by looking at the button text
-        current_label = str(test_mark_button.label)
-        is_expanded = current_label.endswith("▲")
-        
-        if is_expanded:
-            # Currently expanded, so collapse
-            test_mark_button.label = "TEST MARK ▼"
-            # Hide all highlights by clearing the list
-            highlights_list.clear()
-            debug_log("Collapsed test mark dropdown - cleared highlights")
-        else:
-            # Currently collapsed, so expand
-            test_mark_button.label = "TEST MARK ▲"
-            # Show all highlights by updating the list
-            self.update_highlights_list()
-            debug_log("Expanded test mark dropdown - showing all highlights")
+    # PRESERVED DROPDOWN LOGIC - can be reused for future dropdown functionality
+    # def toggle_dropdown(self, button_id: str) -> None:
+    #     """Toggle a dropdown button to show/hide content."""
+    #     highlights_list = self.query_one("#highlights-list", ListView)
+    #     dropdown_button = self.query_one(f"#{button_id}", Button)
+    #     
+    #     # Check current visibility state by looking at the button text
+    #     current_label = str(dropdown_button.label)
+    #     is_expanded = current_label.endswith("▲")
+    #     
+    #     if is_expanded:
+    #         # Currently expanded, so collapse
+    #         dropdown_button.label = dropdown_button.label.replace("▲", "▼")
+    #         # Hide content by clearing the list
+    #         highlights_list.clear()
+    #         debug_log(f"Collapsed {button_id} dropdown - cleared content")
+    #     else:
+    #         # Currently collapsed, so expand
+    #         dropdown_button.label = dropdown_button.label.replace("▼", "▲")
+    #         # Show content by updating the list
+    #         self.update_highlights_list()
+    #         debug_log(f"Expanded {button_id} dropdown - showing content")
     
     def save_focused_note(self) -> None:
         """Save the note from the last focused TextArea."""
@@ -852,7 +1027,13 @@ class EPUBReader(App):
             debug_log("No note TextArea is focused or was last focused")
     
     def delete_focused_highlight(self) -> None:
-        """Delete the highlight associated with the last focused TextArea."""
+        """Delete the highlight or mark based on the last interaction."""
+        # Check if we should delete a mark or a note based on last interaction
+        if self.last_interaction_type == 'mark' and self.last_clicked_mark:
+            self._delete_mark(self.last_clicked_mark)
+            return
+        
+        # Original note/highlight deletion logic
         # Try current focus first, then fall back to last focused
         focused_widget = self.focused
         target_widget = None
@@ -910,12 +1091,147 @@ class EPUBReader(App):
             except Exception as e:
                 debug_log(f"Could not reset background: {e}")
     
+    def _track_mark_click(self, button_id: str) -> None:
+        """Track when a mark button is clicked - handles both delete tracking and dropdown toggle."""
+        # Find the mark data based on the button ID
+        for mark in self.marks:
+            if len(mark) == 6:
+                page_num, start_row, start_col, selected_text, mark_name, timestamp = mark
+                # Create the same sanitized ID that was used for the button
+                mark_name_str = str(mark_name)
+                sanitized_id = ''.join(c if c.isalnum() or c in '-_' else '-' for c in mark_name_str.lower())
+                sanitized_id = '-'.join(filter(None, sanitized_id.split('-')))
+                expected_button_id = f"mark-{sanitized_id}"
+                
+                if button_id == expected_button_id:
+                    # Always track for delete functionality
+                    self.last_clicked_mark = mark
+                    self.last_interaction_type = 'mark'
+                    
+                    # Check if the button is disabled (no notes) - if so, don't toggle
+                    try:
+                        button = self.query_one(f"#{button_id}", Button)
+                        if not button.disabled:
+                            # Handle dropdown toggle only if button is not disabled
+                            self._toggle_mark_dropdown(mark, button_id)
+                            debug_log(f"Toggled mark dropdown: {mark_name} at page {page_num}")
+                        else:
+                            debug_log(f"Clicked disabled mark (no notes): {mark_name} at page {page_num}")
+                    except Exception as e:
+                        debug_log(f"Error checking button state: {e}")
+                    break
+
+    def _delete_mark(self, mark_to_delete) -> None:
+        """Delete a specific mark from the marks list."""
+        try:
+            self.marks.remove(mark_to_delete)
+            page_num, start_row, start_col, selected_text, mark_name, timestamp = mark_to_delete
+            debug_log(f"Deleted mark '{mark_name}' from page {page_num}")
+            
+            # Clean up dropdown state for the deleted mark
+            mark_key = self._get_mark_key(mark_to_delete)
+            if mark_key in self.mark_dropdown_states:
+                del self.mark_dropdown_states[mark_key]
+            
+            # Clear the last clicked mark since it's been deleted
+            self.last_clicked_mark = None
+            self.last_interaction_type = None
+            
+            # Save marks and update the display (this will restore previously hidden notes)
+            self.save_marks()
+            self.update_highlights_list()
+            
+        except ValueError:
+            debug_log("Mark not found in marks list")
+        except Exception as e:
+            debug_log(f"Error deleting mark: {e}")
+
+    def _is_mark_above_note(self, mark, note) -> bool:
+        """Determine if a mark is 'above' a note (comes first when reading left-to-right)."""
+        mark_page, mark_row, mark_col = mark[0], mark[1], mark[2]  # mark format: (page, row, col, text, name, timestamp)
+        note_page, note_row, note_col = note[0], note[1], note[2]  # note format: (page, text, text, row, col, note_text, color)
+        
+        # Compare as tuples for proper ordering: (page, row, col)
+        mark_pos = (mark_page, mark_row, mark_col)
+        note_start_pos = (note_page, note_row, note_col)
+        
+        # Mark is above if its position comes before the note's start position
+        return mark_pos < note_start_pos
+
+    def _get_mark_key(self, mark) -> str:
+        """Generate a unique key for a mark to track dropdown state."""
+        page_num, start_row, start_col, selected_text, mark_name, timestamp = mark
+        return f"mark_{page_num}_{start_row}_{start_col}_{timestamp}"
+
+    def _count_notes_under_mark(self, mark, all_items) -> int:
+        """Count how many notes are controlled by this mark."""
+        mark_page, mark_row, mark_col = mark[0], mark[1], mark[2]
+        mark_pos = (mark_page, mark_row, mark_col)
+        
+        # Find the next mark after this one
+        next_mark_pos = None
+        for item in all_items:
+            if item[0] == 'mark':
+                other_mark_page, other_mark_row, other_mark_col = item[1], item[2], item[3]
+                other_mark_pos = (other_mark_page, other_mark_row, other_mark_col)
+                
+                # Skip the current mark itself
+                if other_mark_pos == mark_pos:
+                    continue
+                    
+                # Find first mark after current mark
+                if other_mark_pos > mark_pos:
+                    next_mark_pos = other_mark_pos
+                    break
+        
+        # Count highlights that fall within this mark's scope
+        note_count = 0
+        for item in all_items:
+            if item[0] == 'highlight':
+                highlight_page, highlight_row, highlight_col = item[1], item[2], item[3]
+                highlight_pos = (highlight_page, highlight_row, highlight_col)
+                
+                # Check if highlight is after this mark
+                if highlight_pos > mark_pos:
+                    # If there's a next mark, make sure highlight is before it
+                    if next_mark_pos is None or highlight_pos < next_mark_pos:
+                        note_count += 1
+        
+        return note_count
+
+    def _toggle_mark_dropdown(self, mark, button_id: str) -> None:
+        """Toggle the dropdown state of a mark and update button appearance."""
+        mark_key = self._get_mark_key(mark)
+        
+        # Get current state (default to False/collapsed for new marks)
+        is_expanded = self.mark_dropdown_states.get(mark_key, False)
+        
+        # Toggle the state
+        new_state = not is_expanded
+        self.mark_dropdown_states[mark_key] = new_state
+        
+        # Update button text to reflect new state
+        try:
+            # Instead of manually updating the label, refresh the entire list
+            # This ensures the correct note count and arrow are shown
+            self.update_highlights_list()
+            
+            mark_name = str(mark[4])  # mark_name is at index 4 in mark tuple
+            if new_state:
+                debug_log(f"Expanded mark: {mark_name}")
+            else:
+                debug_log(f"Collapsed mark: {mark_name}")
+                
+        except Exception as e:
+            debug_log(f"Error updating mark button: {e}")
+
     def on_focus(self, event) -> None:
         """Track when TextAreas get focus for save/delete operations."""
         if (isinstance(event.widget, TextArea) and 
             hasattr(event.widget, 'id') and 
             event.widget.id and event.widget.id.startswith("note_")):
             self.last_focused_textarea = event.widget
+            self.last_interaction_type = 'note'
             debug_log(f"Tracked focused textarea: {event.widget.id}")
     
     
@@ -927,7 +1243,7 @@ class EPUBReader(App):
                 # Find the matching highlight by position
                 if start_pos == (start_row, start_col):
                     # Strip existing brackets and rewrap with new color
-                    clean_text = text.strip('[]{}()<>«»⟨⟩')
+                    clean_text = text.strip('[]{}()<>«»|')
                     new_text = ColorManager.wrap_text_with_color(clean_text, new_color)
                     
                     # Update the highlight data
@@ -969,9 +1285,13 @@ class EPUBReader(App):
                 start_col = int(parts[3])
                 note_text = textarea.text.strip()
                 
+                # If the note text is processed (URLs removed), we need to reconstruct 
+                # the original note with URLs for proper storage
+                final_note_text = self._reconstruct_note_with_urls(page_num, start_row, start_col, note_text)
+                
                 # Update the highlight with the note
-                self.update_highlight_note(page_num, start_row, start_col, note_text)
-                debug_log(f"Saved note for highlight at page {page_num}: {note_text}")
+                self.update_highlight_note(page_num, start_row, start_col, final_note_text)
+                debug_log(f"Saved note for highlight at page {page_num}: {final_note_text}")
                 
                 # Refresh the highlights list to show updated note
                 self.update_highlights_list()
@@ -1031,7 +1351,7 @@ class EPUBReader(App):
         
         if start_row < len(lines):
             if start_row == end_row:
-                manual_text = lines[start_row][start_col:end_col + 1]
+                manual_text = lines[start_row][start_col:end_col]
             else:
                 # Multi-line selection - take from start to end of first line for now
                 manual_text = lines[start_row][start_col:]
@@ -1103,7 +1423,7 @@ class EPUBReader(App):
             highlighted_version = selected_text
             
             # Extract the text without brackets for replacement
-            clean_text = selected_text.strip('[]{}()<>«»⟨⟩')
+            clean_text = selected_text.strip('[]{}()<>«»|')
             highlighted_text = highlighted_text.replace(clean_text, highlighted_version)
         
         text_area.text = highlighted_text
@@ -1136,25 +1456,78 @@ class EPUBReader(App):
         highlight_part = f"[{hex_color}]{clean_text}[/{hex_color}]"
         display_text = f"{page_part} {highlight_part}"
         
+        # Process note text to hide image URLs but keep other text
+        processed_note_text = note if note else ""
+        if note:
+            processed_note_text, _ = self.process_note_for_images(note)
+        
         # Create vertical layout with display text and editable textarea for note
         note_area = TextArea(
-            text=note if note else "",
+            text=processed_note_text,
             id=f"note_{page_num}_{start_row}_{start_col}",
             read_only=False
         )
         note_area.show_line_numbers = False
         
-        content = Vertical(Label(display_text), note_area)
+        # Process images and get the widgets to insert above the note
+        image_widgets = self._get_image_widgets_for_note(note if note else "")
+        
+        # Create content layout: just label and textarea (no images)
+        content_widgets = [Label(display_text), note_area]
+        
+        content = Vertical(*content_widgets)
         highlight_item = ListItem(content)
         
         # Store full data as metadata for note editing
         highlight_item.highlight_data = (page_num, full_text, start_row, start_col, note)
-        return highlight_item
+        return highlight_item, image_widgets
+    
+    def _get_image_widgets_for_note(self, note_text: str) -> list:
+        """Process note text and return list of image widgets."""
+        image_widgets = []
+        
+        if not note_text:
+            return image_widgets
+            
+        debug_log(f"Processing images for note: {note_text[:100]}...")
+        processed_text, image_paths = self.process_note_for_images(note_text)
+        debug_log(f"Found {len(image_paths)} image paths: {image_paths}")
+        
+        # Create image widgets for each downloaded image
+        for image_path in image_paths:
+            try:
+                if TEXTUAL_IMAGE_AVAILABLE:
+                    debug_log(f"Creating TextualImage widget: {image_path}")
+                    image_widget = TextualImage(image_path)
+                    image_widget.add_class("note-image")
+                    image_widgets.append(image_widget)
+                    debug_log(f"Successfully created TextualImage widget")
+                elif IMAGEVIEW_AVAILABLE:
+                    debug_log(f"Creating ImageViewer widget: {image_path}")
+                    image_widget = ImageViewer(image_path)
+                    image_widget.add_class("note-image") 
+                    image_widgets.append(image_widget)
+                    debug_log(f"Successfully created ImageViewer widget")
+                else:
+                    debug_log("No image library available, creating placeholder")
+                    placeholder = Static(f"Image: {os.path.basename(image_path)}")
+                    placeholder.add_class("note-image")
+                    image_widgets.append(placeholder)
+                    
+            except Exception as e:
+                debug_log(f"Error creating image widget: {e}")
+                placeholder = Static(f"Error loading: {os.path.basename(image_path)}")
+                placeholder.add_class("note-image")
+                image_widgets.append(placeholder)
+                
+        return image_widgets
     
     def update_highlights_list(self) -> None:
-        """Update the highlights ListView with all highlights and marks from all pages."""
+        """Update the highlights ListView with marks and notes, respecting mark hierarchy."""
         highlights_list = self.query_one("#highlights-list", ListView)
         highlights_list.clear()
+        
+        # No need to clear separate image panel anymore
         
         # Collect all highlights and marks, then sort by position
         all_items = []
@@ -1177,32 +1550,119 @@ class EPUBReader(App):
                     debug_log(f"Unexpected mark format with {len(mark)} values: {mark}")
                     continue
                 timestamp = 0
-            all_items.append(('mark', page_num, start_row, start_col, selected_text, mark_name, None))
+            all_items.append(('mark', page_num, start_row, start_col, selected_text, mark_name, mark))
         
         # Sort by position (page, row, col)
         all_items.sort(key=lambda x: (x[1], x[2], x[3]))
         
+        # Apply mark hierarchy logic
+        visible_items = self._apply_mark_hierarchy(all_items)
+        
         # Create list items
-        for item in all_items:
+        for item in visible_items:
             if item[0] == 'highlight':
                 _, page_num, start_row, start_col, full_text, note, color = item
-                highlight_item = self._create_highlight_list_item(
+                highlight_item, image_widgets = self._create_highlight_list_item(
                     page_num, full_text, start_row, start_col, note, color
                 )
+                
+                # Add image widgets first (they appear above the note)
+                for image_widget in image_widgets:
+                    image_list_item = ListItem(image_widget)
+                    image_list_item.add_class("image-container")
+                    highlights_list.append(image_list_item)
+                
+                # Then add the highlight item
                 highlights_list.append(highlight_item)
             elif item[0] == 'mark':
-                _, page_num, start_row, start_col, selected_text, mark_name, _ = item
-                mark_item = self._create_mark_list_item(page_num, mark_name, selected_text)
+                _, page_num, start_row, start_col, selected_text, mark_name, mark_data = item
+                mark_item = self._create_mark_list_item(page_num, mark_name, selected_text, mark_data, all_items)
                 highlights_list.append(mark_item)
         
-        debug_log(f"Updated highlights list with {len(all_highlights)} highlights and {len(self.marks)} marks")
+        debug_log(f"Updated highlights list with {len(visible_items)} visible items ({len(all_highlights)} highlights, {len(self.marks)} marks)")
     
+    def _apply_mark_hierarchy(self, all_items) -> list:
+        """Apply mark hierarchy logic to determine which items should be visible."""
+        visible_items = []
+        
+        for i, item in enumerate(all_items):
+            item_type = item[0]
+            
+            if item_type == 'mark':
+                # Marks are always visible
+                visible_items.append(item)
+            elif item_type == 'highlight':
+                # Check if this highlight should be hidden by a mark
+                should_hide = self._should_hide_highlight(item, all_items)
+                if not should_hide:
+                    visible_items.append(item)
+                else:
+                    debug_log(f"Hiding highlight at page {item[1]} row {item[2]} col {item[3]}")
+        
+        return visible_items
     
+    def _should_hide_highlight(self, highlight_item, all_items) -> bool:
+        """Determine if a highlight should be hidden based on mark hierarchy."""
+        highlight_type, highlight_page, highlight_row, highlight_col = highlight_item[:4]
+        highlight_pos = (highlight_page, highlight_row, highlight_col)
+        
+        # Find all marks that are "above" this highlight
+        controlling_mark = None
+        next_mark = None
+        
+        for item in all_items:
+            if item[0] == 'mark':
+                mark_page, mark_row, mark_col = item[1], item[2], item[3]
+                mark_pos = (mark_page, mark_row, mark_col)
+                
+                if mark_pos < highlight_pos:
+                    # This mark is above the highlight
+                    controlling_mark = item
+                elif mark_pos > highlight_pos:
+                    # This is the first mark after the highlight
+                    next_mark = item
+                    break
+        
+        # If there's no controlling mark, highlight is visible
+        if not controlling_mark:
+            return False
+            
+        # If there's a controlling mark, check if it's expanded
+        mark_data = controlling_mark[6]  # The full mark tuple
+        if mark_data:
+            mark_key = self._get_mark_key(mark_data)
+            is_expanded = self.mark_dropdown_states.get(mark_key, False)
+            
+            # Hide if mark is collapsed (False), show if expanded (True)
+            return not is_expanded
+        
+        return False
     
-    def _create_mark_list_item(self, page_num: int, mark_name: str, selected_text: str) -> ListItem:
+    def _create_mark_list_item(self, page_num: int, mark_name, selected_text: str, mark_data, all_items) -> ListItem:
         """Create a ListItem for a mark."""
-        # Create mark button similar to TEST MARK
-        mark_button = Button(f"{mark_name.upper()} ▼", id=f"mark-{mark_name.lower().replace(' ', '-')}")
+        # Convert mark_name to string in case it's a timestamp or other type
+        mark_name_str = str(mark_name)
+        
+        # Count notes under this mark
+        note_count = self._count_notes_under_mark(mark_data, all_items)
+        
+        # Sanitize mark_name for use as ID: only allow letters, numbers, underscores, hyphens
+        sanitized_id = ''.join(c if c.isalnum() or c in '-_' else '-' for c in mark_name_str.lower())
+        # Remove consecutive hyphens and strip leading/trailing hyphens
+        sanitized_id = '-'.join(filter(None, sanitized_id.split('-')))
+        
+        # Create button label based on whether it has notes
+        if note_count > 0:
+            # Get dropdown state to show correct arrow
+            mark_key = self._get_mark_key(mark_data)
+            is_expanded = self.mark_dropdown_states.get(mark_key, False)
+            arrow = "▲" if is_expanded else "▼"
+            button_label = f"{mark_name_str.upper()} ({note_count}) {arrow}"
+        else:
+            # No notes, no arrow
+            button_label = f"{mark_name_str.upper()}"
+        
+        mark_button = Button(button_label, id=f"mark-{sanitized_id}")
         mark_button.can_focus = False
         mark_button.active_effect_duration = 0
         mark_button.styles.color = "#ffffff"
@@ -1210,8 +1670,15 @@ class EPUBReader(App):
         mark_button.styles.text_align = "left"
         mark_button.styles.margin = (1, 0, 0, 0)
         
+        # Disable button interaction if no notes
+        if note_count == 0:
+            mark_button.disabled = True
+            mark_button.styles.color = "#666666"  # Dimmed color for disabled state
+        
         # Create and return the ListItem with the button as content
         item = ListItem(mark_button)
+        # Add mark-item class to remove borders via CSS
+        item.add_class("mark-item")
         return item
     
     def watch_current_page(self) -> None:
@@ -1256,7 +1723,7 @@ class EPUBReader(App):
                             # Add yellow as default color, ensure text has yellow brackets
                             if not (text.startswith('[') and text.endswith(']')):
                                 # Add yellow brackets if they're missing
-                                clean_text = text.strip('[]{}()<>«»⟨⟩')
+                                clean_text = text.strip('[]{}()<>«»|')
                                 text = f"[{clean_text}]"
                             updated_highlights.append((start_pos, end_pos, text, note, "yellow"))
                         else:
@@ -1272,6 +1739,9 @@ class EPUBReader(App):
             
         # Load marks
         self.load_marks()
+        
+        # Store saved page to load after mount (avoid reactive issues during init)
+        self.saved_page_to_load = self._get_saved_page()
     
     def save_marks(self) -> None:
         """Save marks to a pickle file."""
@@ -1295,8 +1765,112 @@ class EPUBReader(App):
             debug_log(f"Error loading marks: {e}")
             self.marks = []
     
+    def _parse_image_references(self, text: str) -> list:
+        """Parse text for image URLs or references and return list of found images."""
+        image_references = []
+        
+        # Regex patterns for different image reference formats
+        patterns = [
+            # URL patterns (http/https)
+            r'https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg)(?:\?[^\s]*)?',
+            # Markdown image syntax ![alt](url)
+            r'!\[[^\]]*\]\(([^\)]+\.(?:jpg|jpeg|png|gif|webp|svg)(?:\?[^\)]*)?)\)',
+            # HTML image tags <img src="url">
+            r'<img[^>]+src=["\']([^"\']+\.(?:jpg|jpeg|png|gif|webp|svg)(?:\?[^"\']*)?)["\'][^>]*>',
+            # Simple file references (local files)
+            r'[^\s]+\.(?:jpg|jpeg|png|gif|webp|svg)'
+        ]
+        
+        for pattern in patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if match.groups():
+                    # Extract URL from capturing group (for markdown/html)
+                    url = match.group(1)
+                else:
+                    # Use the full match (for direct URLs)
+                    url = match.group(0)
+                
+                if url not in image_references:
+                    image_references.append(url)
+                    debug_log(f"Found image reference: {url}")
+        
+        return image_references
+
+
+    def _create_image_widget(self, image_path: str):
+        """Create a TextualImage widget for display."""
+        if not TEXTUAL_IMAGE_AVAILABLE:
+            return Static(f"[Image: {image_path}] (textual-image not available)")
+        
+        try:
+            return TextualImage(image_path)
+        except Exception as e:
+            debug_log(f"Error creating image widget for {image_path}: {e}")
+            return Static(f"[Image Error: {image_path}]")
+
+    def _process_note_images(self, note_text: str) -> list:
+        """Process a note's text and return list of image widgets for any found images."""
+        image_widgets = []
+        
+        if not note_text:
+            return image_widgets
+        
+        # Find image references in the note
+        image_refs = self._parse_image_references(note_text)
+        
+        for img_ref in image_refs:
+            # Check if it's a URL that needs downloading
+            if img_ref.startswith(('http://', 'https://')):
+                local_path = self.download_image(img_ref)
+                if local_path:
+                    widget = self._create_image_widget(local_path)
+                    image_widgets.append(widget)
+            else:
+                # Local file reference
+                if os.path.exists(img_ref):
+                    widget = self._create_image_widget(img_ref)
+                    image_widgets.append(widget)
+                else:
+                    debug_log(f"Local image file not found: {img_ref}")
+        
+        return image_widgets
+
+    def save_current_page(self) -> None:
+        """Save the current page number to a file."""
+        try:
+            with open('current_page.pkl', 'wb') as f:
+                pickle.dump(self.current_page, f)
+            debug_log(f"Saved current page: {self.current_page}")
+        except Exception as e:
+            debug_log(f"Error saving current page: {e}")
+
+    def _get_saved_page(self) -> int:
+        """Get the saved page number from a file without setting it."""
+        try:
+            with open('current_page.pkl', 'rb') as f:
+                saved_page = pickle.load(f)
+                # Ensure the saved page is within valid bounds
+                if 0 <= saved_page < len(self.pages):
+                    debug_log(f"Found saved page: {saved_page}")
+                    return saved_page
+                else:
+                    debug_log(f"Saved page {saved_page} out of bounds, will start at page 0")
+                    return 0
+        except FileNotFoundError:
+            debug_log("No current page file found, will start at page 0")
+            return 0
+        except Exception as e:
+            debug_log(f"Error loading current page: {e}")
+            return 0
+    
     def on_mount(self) -> None:
         """Called when the app is mounted and ready."""
+        # Set the current page now that DOM is ready
+        if hasattr(self, 'saved_page_to_load'):
+            self.current_page = self.saved_page_to_load
+            debug_log(f"Set current page to: {self.current_page}")
+        
         # Now that the UI is ready, update displays with loaded highlights
         if self.highlights:
             # Don't show highlights initially - let the dropdown control visibility
@@ -1304,6 +1878,10 @@ class EPUBReader(App):
         
         # Update the highlights list to show marks and highlights
         self.update_highlights_list()
+        
+        # Save current page on exit
+        import atexit
+        atexit.register(self.save_current_page)
         
         # Force override the ListView background after mounting
         try:
