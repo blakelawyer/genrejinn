@@ -650,17 +650,12 @@ class EPUBReader(App):
             if filepath:
                 image_data.append((url, filepath))
                 
-                if not is_server_mode:
-                    # In local mode, hide the URL (original behavior)
-                    debug_log(f"Local mode: hiding URL {url}")
-                    processed_text = processed_text.replace(url, "")
-                else:
-                    # In server mode, keep the URL visible as plain text
-                    debug_log(f"Server mode: keeping URL visible {url}")
+                # Hide URLs in both local and server mode now
+                debug_log(f"Hiding URL {url}")
+                processed_text = processed_text.replace(url, "")
         
-        # Clean up extra whitespace only if URLs were removed (local mode)
-        if not is_server_mode:
-            processed_text = re.sub(r'\s+', ' ', processed_text).strip()
+        # Clean up extra whitespace after removing URLs
+        processed_text = re.sub(r'\s+', ' ', processed_text).strip()
         
         return processed_text, image_data
     
@@ -1529,15 +1524,13 @@ class EPUBReader(App):
         image_widgets = self._get_image_widgets_for_note(note if note else "")
         
         # Create content layout
-        content_widgets = [Label(display_text)]
+        content_widgets = [Label(display_text), note_area]
         
-        # In server mode, add markdown links between images and textarea
+        # In server mode, add markdown links below the textarea
         if is_server_mode and note:
             markdown_links = self._create_image_markdown_links(note)
             if markdown_links:
                 content_widgets.append(markdown_links)
-        
-        content_widgets.append(note_area)
         
         content = Vertical(*content_widgets)
         highlight_item = ListItem(content)
@@ -1593,18 +1586,21 @@ class EPUBReader(App):
         if not image_urls:
             return None
         
-        # Create Markdown content with clickable links
-        markdown_content = "**Image Links:**\n\n"
-        for url in image_urls:
+        # Create Markdown content with clickable links (no header, no bullets)
+        markdown_content = ""
+        for i, url in enumerate(image_urls):
             # Extract filename for display text
             try:
                 filename = os.path.basename(urllib.parse.urlparse(url).path)
                 if not filename or filename == '/' or '.' not in filename:
-                    filename = f"Image {len(markdown_content.split('- '))}"
+                    filename = f"Image {i + 1}"
             except:
-                filename = f"Image {len(markdown_content.split('- '))}"
+                filename = f"Image {i + 1}"
             
-            markdown_content += f"- [{filename}]({url})\n"
+            # Add newline between multiple links
+            if i > 0:
+                markdown_content += "\n"
+            markdown_content += f"[{filename}]({url})"
         
         # Create and style the Markdown widget
         markdown_widget = Markdown(markdown_content, id=f"image-links-{hash(note_text) % 10000}")
