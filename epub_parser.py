@@ -3,73 +3,104 @@
 
 import zipfile
 import re
-import sys
 import pickle
 import os
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
-from textual.widgets import Button, Static, TextArea, ProgressBar, ListView, ListItem, Label, Input, Select
+from textual.containers import Horizontal, Vertical, Center, Middle
+from textual.screen import Screen
+from textual.widgets import Button, Static, TextArea, ProgressBar, ListView, ListItem, Label, OptionList, Input
 from textual.widgets.text_area import TextAreaTheme
 from rich.style import Style
 from textual.reactive import reactive
-from tree_sitter_parser import tree_sitter_language
+from syntax.manager import tree_sitter_language
 # Debug logging function
 def debug_log(message):
     with open('log.txt', 'a') as f:
         f.write(f"{message}\n")
         f.flush()
 
-# Load paragraphs from EPUB
-debug_log("Starting EPUB loading...")
-epub_file = zipfile.ZipFile('bookshelf/gravitys-rainbow.epub', 'r')
-html_files = [f for f in epub_file.namelist() if f.endswith('.html') and 'text' in f]
-html_files.sort()
+# Color management system
 
-all_paragraphs = []
-
-for filename in html_files:
-    content = epub_file.read(filename).decode('utf-8', errors='ignore')
+class ColorManager:
+    """Centralized color management for highlights"""
     
-    para_matches = re.findall(r'<p[^>]*>(.*?)</p>', content, re.DOTALL | re.IGNORECASE)
+    # 3-character codes to full color names
+    COLOR_MAPPING = {
+        "yel": "yellow",
+        "red": "red", 
+        "grn": "green",
+        "blu": "blue",
+        "wht": "white"
+    }
     
-    for para_html in para_matches:
-        para_text = re.sub(r'<[^>]+>', '', para_html)
-        para_text = re.sub(r'\s+', ' ', para_text).strip()
+    # Color brackets for text wrapping
+    COLOR_BRACKETS = {
+        "yellow": ("[", "]"),
+        "green": ("{", "}"),
+        "red": ("<", ">"),
+        "blue": ("«", "»"),
+        "white": ("⟨", "⟩")
+    }
+    
+    # Color hex values for display
+    COLOR_HEX = {
+        "yellow": "#fbdda7",
+        "red": "#ff6a6e",
+        "green": "#6be28d", 
+        "blue": "#b3e3f2",
+        "white": "#ffffff"
+    }
+    
+    @classmethod
+    def get_full_color_name(cls, short_name: str) -> str:
+        """Convert 3-char code to full color name"""
+        return cls.COLOR_MAPPING.get(short_name.lower(), "yellow")
+    
+    @classmethod
+    def get_brackets(cls, color: str) -> tuple:
+        """Get open/close brackets for a color"""
+        return cls.COLOR_BRACKETS.get(color, ("[", "]"))
+    
+    @classmethod
+    def get_hex(cls, color: str) -> str:
+        """Get hex value for a color"""
+        return cls.COLOR_HEX.get(color, "#fbdda7")
+    
+    @classmethod
+    def strip_brackets(cls, text: str, color: str) -> str:
+        """Strip bracket characters from highlighted text to get clean content."""
+        if not text or color not in cls.COLOR_BRACKETS:
+            return text
         
-        if para_text:
-            all_paragraphs.append(para_text)
-
-epub_file.close()
-debug_log(f"Loaded {len(all_paragraphs)} paragraphs total")
-
-# Group paragraphs into exactly 776 pages
-def create_pages(paragraphs, total_pages=776):
-    if not paragraphs:
-        return []
-    
-    pages = []
-    total_paragraphs = len(paragraphs)
-    paragraphs_per_page = total_paragraphs // total_pages
-    extra_paragraphs = total_paragraphs % total_pages
-    
-    start_index = 0
-    for page_num in range(total_pages):
-        # Some pages get one extra paragraph to distribute the remainder
-        page_size = paragraphs_per_page + (1 if page_num < extra_paragraphs else 0)
+        open_bracket, close_bracket = cls.COLOR_BRACKETS[color]
         
-        if start_index >= total_paragraphs:
-            # If we run out of paragraphs, create empty pages
-            pages.append("")
-        else:
-            end_index = min(start_index + page_size, total_paragraphs)
-            page_paragraphs = paragraphs[start_index:end_index]
-            pages.append('\n\n'.join(page_paragraphs))
-            start_index = end_index
+        # Remove opening bracket if text starts with it
+        if text.startswith(open_bracket):
+            text = text[len(open_bracket):]
+        
+        # Remove closing bracket if text ends with it
+        if text.endswith(close_bracket):
+            text = text[:-len(close_bracket)]
+        
+        return text
     
-    return pages
+    @classmethod
+    def wrap_text_with_color(cls, text: str, color: str) -> str:
+        """Wrap text with color brackets"""
+        open_bracket, close_bracket = cls.get_brackets(color)
+        return f"{open_bracket}{text}{close_bracket}"
 
-all_pages = create_pages(all_paragraphs)
-debug_log(f"Created {len(all_pages)} pages from paragraphs")
+def parse_highlight_tuple(highlight: tuple) -> tuple:
+    """Parse highlight tuple handling both old (4-element) and new (5-element) formats.
+    
+    Returns: (start_pos, end_pos, text, note, color)
+    """
+    if len(highlight) == 4:
+        start_pos, end_pos, text, note = highlight
+        return start_pos, end_pos, text, note, "yellow"
+    else:
+        return highlight  # Already 5 elements
+
 
 
 class EPUBReader(App):
@@ -83,7 +114,7 @@ class EPUBReader(App):
     }
     
     #left-panel {
-        width: 50%;
+        width: 60%;
     }
     
     
@@ -112,7 +143,7 @@ class EPUBReader(App):
         border: solid #9aa4ca;
         background: #1f1f39;
         color: #ffffff;
-        width: 50%;
+        width: 40%;
         height: 100%;
     }
     
@@ -208,11 +239,11 @@ class EPUBReader(App):
     #counter {
         text-align: center;
         margin: 0;
-        color: #fbdda7 !important;
+        color: #ffffff !important;
     }
     
     Static#counter {
-        color: #fbdda7 !important;
+        color: #ffffff !important;
     }
     
     /* Button text colors */
@@ -261,9 +292,6 @@ class EPUBReader(App):
     
     #highlight-controls {
         height: auto;
-        border: solid #9aa4ca;
-        margin: 1;
-        padding: 1;
         align: center middle;
     }
     
@@ -275,7 +303,8 @@ class EPUBReader(App):
     }
     
     #notes-title {
-        color: #6be28d;
+        color: #ffffff;
+        text-style: bold;
     }
     
     
@@ -299,12 +328,12 @@ class EPUBReader(App):
     ListView ListItem TextArea {
         height: auto;
         min-height: 3;
-        max-height: 8;
         border: none;
         margin: 0;
         padding: 1;
         background: #1f1f39;
         color: #9aa4ca;
+        overflow-y: hidden;
     }
     
     /* Ensure ListView items have proper sizing */
@@ -417,27 +446,96 @@ class EPUBReader(App):
         scrollbar-color-hover: #9aa4ca;
         scrollbar-corner-color: #1f1f39;
     }
+    
+    /* Mark input field styling */
+    #mark-input {
+        background: #1f1f39;
+        color: #9aa4ca;
+        border: solid #9aa4ca;
+        margin-bottom: 1;
+    }
+    
     """
     
     current_page = reactive(0)
     
     def __init__(self):
         super().__init__()
-        self.pages = all_pages
-        # Store highlights as {page_number: [(start_pos, end_pos, text, note), ...]}
+        self.pages = self._load_epub_content()
+        # Store highlights as {page_number: [(start_pos, end_pos, text, note, color), ...]}
         self.highlights = {}
-        self.selected_highlight = None  # Track currently selected highlight for note editing
         self.last_focused_textarea = None  # Track the last focused TextArea for save/delete operations
         # Color cycling for highlight button
         self.current_color_index = 0
         self.highlight_colors = [
-            ("Yellow", "#fbdda7"),
-            ("Red", "#ff6a6e"), 
-            ("Green", "#6be28d"),
-            ("Blue", "#b3e3f2")
+            ("YEL", "#fbdda7"),
+            ("RED", "#ff6a6e"), 
+            ("GRN", "#6be28d"),
+            ("BLU", "#b3e3f2"),
+            ("WHT", "#ffffff")
         ]
+        # Button feedback state tracking
+        self.button_feedback_active = {}
+        # Marks for organizing highlights into sections
+        self.marks = []  # List of (page_num, start_row, start_col, mark_text, mark_name, timestamp)
         # Load existing highlights
         self.load_highlights()
+    
+    def _load_epub_paragraphs(self, epub_path: str = 'bookshelf/gravitys-rainbow.epub') -> list:
+        """Load paragraphs from EPUB file."""
+        debug_log("Starting EPUB loading...")
+        
+        with zipfile.ZipFile(epub_path, 'r') as epub_file:
+            html_files = [f for f in epub_file.namelist() if f.endswith('.html') and 'text' in f]
+            html_files.sort()
+            
+            all_paragraphs = []
+            for filename in html_files:
+                content = epub_file.read(filename).decode('utf-8', errors='ignore')
+                para_matches = re.findall(r'<p[^>]*>(.*?)</p>', content, re.DOTALL | re.IGNORECASE)
+                
+                for para_html in para_matches:
+                    para_text = re.sub(r'<[^>]+>', '', para_html)
+                    para_text = re.sub(r'\s+', ' ', para_text).strip()
+                    
+                    if para_text:
+                        all_paragraphs.append(para_text)
+        
+        debug_log(f"Loaded {len(all_paragraphs)} paragraphs total")
+        return all_paragraphs
+    
+    def _create_pages(self, paragraphs: list, total_pages: int = 776) -> list:
+        """Group paragraphs into pages."""
+        if not paragraphs:
+            return []
+        
+        pages = []
+        total_paragraphs = len(paragraphs)
+        paragraphs_per_page = total_paragraphs // total_pages
+        extra_paragraphs = total_paragraphs % total_pages
+        
+        start_index = 0
+        for page_num in range(total_pages):
+            # Some pages get one extra paragraph to distribute the remainder
+            page_size = paragraphs_per_page + (1 if page_num < extra_paragraphs else 0)
+            
+            if start_index >= total_paragraphs:
+                # If we run out of paragraphs, create empty pages
+                pages.append("")
+            else:
+                end_index = min(start_index + page_size, total_paragraphs)
+                page_paragraphs = paragraphs[start_index:end_index]
+                pages.append('\n\n'.join(page_paragraphs))
+                start_index = end_index
+        
+        return pages
+    
+    def _load_epub_content(self) -> list:
+        """Load and process EPUB content into pages."""
+        paragraphs = self._load_epub_paragraphs()
+        pages = self._create_pages(paragraphs)
+        debug_log(f"Created {len(pages)} pages from paragraphs")
+        return pages
     
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -497,6 +595,7 @@ class EPUBReader(App):
                     
                     yield text_area
                     with Vertical(id="left-controls"):
+                        yield Static(f"1 / {len(self.pages)}", id="counter")
                         with Horizontal():
                             back_button = Button("Back", id="prev")
                             back_button.can_focus = False
@@ -507,26 +606,51 @@ class EPUBReader(App):
                             next_button.can_focus = False
                             next_button.active_effect_duration = 0
                             yield next_button
-                        yield Static(f"1 / {len(self.pages)}", id="counter")
-                    with Horizontal(id="highlight-controls"):
-                        color_button = Button("Color", id="color-button")
-                        color_button.can_focus = False
-                        color_button.active_effect_duration = 0
-                        yield color_button
-                        highlight_button = Button("Highlight", id="highlight")
-                        highlight_button.can_focus = False
-                        highlight_button.active_effect_duration = 0
-                        yield highlight_button
-                        save_button = Button("Save", id="save-note")
-                        save_button.can_focus = False
-                        save_button.active_effect_duration = 0
-                        yield save_button
-                        delete_button = Button("Delete", id="delete-highlight")
-                        delete_button.can_focus = False
-                        delete_button.active_effect_duration = 0
-                        yield delete_button
+                        with Horizontal(id="highlight-controls"):
+                            # Mark button for creating section markers
+                            mark_button = Button("Mark", id="mark")
+                            mark_button.can_focus = False
+                            mark_button.active_effect_duration = 0
+                            mark_button.styles.color = "#ffffff"
+                            yield mark_button
+                            
+                            # Set up color button with initial yellow color
+                            color_name, color_hex = self.highlight_colors[self.current_color_index]
+                            color_button = Button(color_name, id="color-button")
+                            color_button.can_focus = False
+                            color_button.active_effect_duration = 0
+                            color_button.styles.color = color_hex
+                            yield color_button
+                            highlight_button = Button("Highlight", id="highlight")
+                            highlight_button.can_focus = False
+                            highlight_button.active_effect_duration = 0
+                            yield highlight_button
+                            save_button = Button("Save", id="save-note")
+                            save_button.can_focus = False
+                            save_button.active_effect_duration = 0
+                            yield save_button
+                            delete_button = Button("Delete", id="delete-highlight")
+                            delete_button.can_focus = False
+                            delete_button.active_effect_duration = 0
+                            yield delete_button
                 with Vertical(id="notes-panel"):
                     yield Static("HIGHLIGHTS & NOTES", id="notes-title")
+                    
+                    # Mark input field (initially hidden)
+                    mark_input = Input(placeholder="Enter mark name...", id="mark-input")
+                    mark_input.styles.display = "none"
+                    yield mark_input
+                    
+                    
+                    # Add test mark dropdown
+                    test_mark_button = Button("TEST MARK ▼", id="test-mark-dropdown")
+                    test_mark_button.can_focus = False
+                    test_mark_button.active_effect_duration = 0
+                    test_mark_button.styles.color = "#ffffff"
+                    test_mark_button.styles.width = "100%"
+                    test_mark_button.styles.text_align = "left"
+                    yield test_mark_button
+                    
                     highlights_list = ListView(id="highlights-list")
                     highlights_list.styles.background = "#1f1f39"
                     # Disable ListView's built-in selection behavior
@@ -534,18 +658,148 @@ class EPUBReader(App):
                     yield highlights_list
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        # Add visual feedback to all buttons
+        self._add_button_press_feedback(event.button)
+        
         if event.button.id == "next" and self.current_page < len(self.pages) - 1:
             self.current_page += 1
         elif event.button.id == "prev" and self.current_page > 0:
             self.current_page -= 1
+        elif event.button.id == "mark":
+            self.create_simple_mark()
         elif event.button.id == "highlight":
             self.highlight_selected_text()
         elif event.button.id == "save-note":
-            self.save_focused_note()
+            # Check if we have a pending mark to save, otherwise save focused note
+            if hasattr(self, '_pending_mark'):
+                self.save_pending_mark()
+            else:
+                self.save_focused_note()
         elif event.button.id == "delete-highlight":
             self.delete_focused_highlight()
         elif event.button.id == "color-button":
             self.cycle_color()
+        elif event.button.id == "test-mark-dropdown":
+            self.toggle_test_mark_dropdown()
+    
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter key in input fields."""
+        if event.input.id == "mark-input":
+            # Enter key saves the mark
+            self.save_pending_mark()
+    
+    
+    def _add_button_press_feedback(self, button: Button) -> None:
+        """Add visual feedback when button is pressed by changing border and text color briefly."""
+        button_id = button.id
+        
+        # If feedback is already active for this button, ignore the new click
+        if self.button_feedback_active.get(button_id, False):
+            return
+        
+        # Mark feedback as active
+        self.button_feedback_active[button_id] = True
+        
+        # Store original styles (only if not already stored)
+        if not hasattr(button, '_original_border'):
+            button._original_border = button.styles.border
+            button._original_outline = button.styles.outline
+            button._original_color = button.styles.color
+        
+        # Change border to heavy style with foreground color
+        button.styles.border = ("heavy", "#9aa4ca")
+        
+        # Only change text color for non-color buttons to preserve color button's intended color
+        if button_id != "color-button":
+            button.styles.color = "#9aa4ca"  # Text color becomes foreground color
+        
+        # Revert styles after brief delay
+        self.set_timer(0.5, lambda: self._revert_button_styles(button))
+    
+    def _revert_button_styles(self, button: Button) -> None:
+        """Revert button styles to original state."""
+        button_id = button.id
+        
+        # Restore original styles
+        if hasattr(button, '_original_border'):
+            button.styles.border = button._original_border
+            button.styles.outline = button._original_outline
+            
+            # For color button, don't restore the stored color - use current color from highlight_colors
+            if button_id == "color-button":
+                color_name, color_hex = self.highlight_colors[self.current_color_index]
+                button.styles.color = color_hex
+            else:
+                button.styles.color = button._original_color
+        
+        # Mark feedback as inactive
+        self.button_feedback_active[button_id] = False
+    
+    
+    def create_simple_mark(self) -> None:
+        """Start mark creation by showing input field."""
+        text_area = self.query_one("#text-area", TextArea)
+        
+        if text_area.selection.is_empty:
+            debug_log("No text selected for mark")
+            return
+        
+        # Get the selected text and position
+        selected_text = text_area.selected_text.strip()
+        if not selected_text:
+            debug_log("Empty text selected for mark")
+            return
+        
+        # Get cursor position and store as pending mark
+        start_row, start_col = text_area.selection.start
+        self._pending_mark = (self.current_page, start_row, start_col, selected_text)
+        
+        # Show input field and save button
+        mark_input = self.query_one("#mark-input", Input)
+        mark_input.placeholder = f"Name for mark: '{selected_text[:20]}...'" if len(selected_text) > 20 else f"Name for mark: '{selected_text}'"
+        mark_input.styles.display = "block"
+        mark_input.focus()
+        
+        
+        debug_log(f"Showing mark input for: '{selected_text}'")
+    
+    def save_pending_mark(self) -> None:
+        """Save the pending mark with the name from the input field."""
+        if not hasattr(self, '_pending_mark'):
+            debug_log("No pending mark to save")
+            return
+        
+        mark_input = self.query_one("#mark-input", Input)
+        mark_name = mark_input.value.strip()
+        
+        if not mark_name:
+            mark_name = "Unnamed Mark"
+        
+        # Get pending mark data
+        page_num, start_row, start_col, selected_text = self._pending_mark
+        
+        # Create timestamp and save mark
+        import time
+        timestamp = time.time()
+        mark_data = (page_num, start_row, start_col, selected_text, mark_name, timestamp)
+        self.marks.append(mark_data)
+        
+        # Save marks to file
+        self.save_marks()
+        
+        debug_log(f"Saved mark: '{mark_name}' ('{selected_text}') at page {page_num}")
+        
+        # Hide input field
+        mark_input.value = ""
+        mark_input.styles.display = "none"
+        
+        # Clear selection
+        text_area = self.query_one("#text-area", TextArea)
+        from textual.widgets.text_area import Selection
+        text_area.selection = Selection(text_area.selection.end, text_area.selection.end)
+        
+        # Clear pending mark
+        del self._pending_mark
     
     def cycle_color(self) -> None:
         """Cycle through colors and update the button appearance."""
@@ -559,6 +813,28 @@ class EPUBReader(App):
         color_button.styles.color = color_hex
         
         debug_log(f"Cycled to color: {color_name} ({color_hex})")
+    
+    def toggle_test_mark_dropdown(self) -> None:
+        """Toggle the test mark dropdown to show/hide all highlights."""
+        highlights_list = self.query_one("#highlights-list", ListView)
+        test_mark_button = self.query_one("#test-mark-dropdown", Button)
+        
+        # Check current visibility state by looking at the button text
+        current_label = str(test_mark_button.label)
+        is_expanded = current_label.endswith("▲")
+        
+        if is_expanded:
+            # Currently expanded, so collapse
+            test_mark_button.label = "TEST MARK ▼"
+            # Hide all highlights by clearing the list
+            highlights_list.clear()
+            debug_log("Collapsed test mark dropdown - cleared highlights")
+        else:
+            # Currently collapsed, so expand
+            test_mark_button.label = "TEST MARK ▲"
+            # Show all highlights by updating the list
+            self.update_highlights_list()
+            debug_log("Expanded test mark dropdown - showing all highlights")
     
     def save_focused_note(self) -> None:
         """Save the note from the last focused TextArea."""
@@ -610,50 +886,27 @@ class EPUBReader(App):
     
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle selection of a highlight in the ListView."""
-        debug_log(f"ListView selected event triggered - ListView ID: {event.list_view.id}")
-        debug_log(f"Selected item type: {type(event.item)}")
-        debug_log(f"Selected item has highlight_data: {hasattr(event.item, 'highlight_data')}")
-        debug_log(f"Event widget: {getattr(event, 'widget', 'N/A')}")
-        debug_log(f"Event attributes: {dir(event)}")
-        
         if event.list_view.id == "highlights-list" and hasattr(event.item, 'highlight_data'):
-            debug_log(f"Raw highlight_data: {event.item.highlight_data}")
             page_num, full_text, start_row, start_col, note = event.item.highlight_data
-            debug_log(f"Selected highlight on page {page_num + 1}: {full_text[:50]}...")
-            debug_log(f"Note value from data: '{note}' (type: {type(note)})")
-            
-            # Store selected highlight for note editing
-            self.selected_highlight = (page_num, start_row, start_col)
+            debug_log(f"Selected highlight on page {page_num + 1}")
             
             # Focus the textarea widget for this specific highlight
             try:
                 input_id = f"note_{page_num}_{start_row}_{start_col}"
                 note_input = self.query_one(f"#{input_id}", TextArea)
                 note_input.focus()
-                self.last_focused_textarea = note_input  # Track this as the last focused
-                debug_log(f"Focused textarea widget: {input_id}")
+                self.last_focused_textarea = note_input
             except Exception as e:
                 debug_log(f"Could not focus textarea widget: {e}")
-        else:
-            debug_log("ListView selection event but not on highlights-list or no highlight_data")
     
     def on_click(self, event) -> None:
-        """Log all click events to debug highlighting issues."""
-        debug_log(f"Click event - Widget: {event.widget}, Type: {type(event.widget)}")
-        debug_log(f"Click coordinates: x={event.x}, y={event.y}")
-        debug_log(f"Widget ID: {getattr(event.widget, 'id', 'No ID')}")
-        debug_log(f"Widget classes: {getattr(event.widget, 'classes', 'No classes')}")
-        debug_log(f"Event style: {getattr(event, 'style', 'No style')}")
-        
-        # If clicking on the ListView container itself (not an item), try to prevent highlighting
+        """Reset ListView background on click."""
         if (hasattr(event, 'widget') and 
             hasattr(event.widget, 'id') and 
             event.widget.id == "highlights-list"):
             try:
-                # Force background reset immediately after click
                 event.widget.styles.background = "#1f1f39"
                 event.widget.refresh()
-                debug_log("Reset ListView background after click")
             except Exception as e:
                 debug_log(f"Could not reset background: {e}")
     
@@ -669,32 +922,22 @@ class EPUBReader(App):
     def update_highlight_color(self, page_num: int, start_row: int, start_col: int, new_color: str):
         """Update the color of a specific highlight."""
         if page_num in self.highlights:
-            for i, (start_pos, end_pos, text, note) in enumerate(self.highlights[page_num]):
+            for i, highlight in enumerate(self.highlights[page_num]):
+                start_pos, end_pos, text, note, color = parse_highlight_tuple(highlight)
                 # Find the matching highlight by position
                 if start_pos == (start_row, start_col):
-                    # Update the highlight text with new color brackets
-                    color_brackets = {
-                        "yellow": ("[", "]"),
-                        "green": ("{", "}"),
-                        "red": ("<", ">"),
-                        "blue": ("«", "»"),
-                        "white": ("⟨", "⟩")
-                    }
+                    # Strip existing brackets and rewrap with new color
+                    clean_text = text.strip('[]{}()<>«»⟨⟩')
+                    new_text = ColorManager.wrap_text_with_color(clean_text, new_color)
                     
-                    if new_color in color_brackets:
-                        open_bracket, close_bracket = color_brackets[new_color]
-                        new_text = f"{open_bracket}{text.strip('[]{}()<>«»⟨⟩')}{close_bracket}"
-                        
-                        # Update the highlight data
-                        self.highlights[page_num][i] = (start_pos, end_pos, new_text, note)
-                        debug_log(f"Updated highlight text to: {new_text}")
-                        
-                        # Refresh the page display if it's the current page
-                        if page_num == self.current_page:
-                            self.update_page()
-                        
-                        # Refresh the highlights list
-                        self.update_highlights_list()
+                    # Update the highlight data
+                    self.highlights[page_num][i] = (start_pos, end_pos, new_text, note, new_color)
+                    debug_log(f"Updated highlight text to: {new_text}")
+                    
+                    # Refresh displays if needed
+                    if page_num == self.current_page:
+                        self.apply_simple_highlighting()
+                    self.update_highlights_list()
                     break
     
     def on_key(self, event) -> None:
@@ -742,9 +985,9 @@ class EPUBReader(App):
             # Remove the highlight entirely
             if page_num in self.highlights:
                 self.highlights[page_num] = [
-                    (start_pos, end_pos, text, old_note) 
-                    for start_pos, end_pos, text, old_note in self.highlights[page_num]
-                    if start_pos != (start_row, start_col)
+                    highlight 
+                    for highlight in self.highlights[page_num]
+                    if (highlight[0] if len(highlight) >= 1 else None) != (start_row, start_col)
                 ]
                 # Remove the page entry if no highlights remain
                 if not self.highlights[page_num]:
@@ -752,13 +995,19 @@ class EPUBReader(App):
                 debug_log(f"Deleted highlight at page {page_num}")
                 # Update page display to remove visual highlighting
                 self.apply_simple_highlighting()
+                # Update the highlights list in the right panel
+                self.update_highlights_list()
         else:
             # Find and update the highlight with the note
             if page_num in self.highlights:
-                for i, (start_pos, end_pos, text, old_note) in enumerate(self.highlights[page_num]):
+                for i, highlight in enumerate(self.highlights[page_num]):
+                    start_pos, end_pos, text, old_note, color = parse_highlight_tuple(highlight)
                     if start_pos == (start_row, start_col):
-                        # Update the highlight with the new note
-                        self.highlights[page_num][i] = (start_pos, end_pos, text, note_text)
+                        # Update the highlight with the new note (preserve color info)
+                        if len(highlight) == 4:
+                            self.highlights[page_num][i] = (start_pos, end_pos, text, note_text, "yellow")
+                        else:
+                            self.highlights[page_num][i] = (start_pos, end_pos, text, note_text, color)
                         debug_log(f"Updated note for highlight: {note_text}")
                         break
         
@@ -766,21 +1015,13 @@ class EPUBReader(App):
         self.save_highlights()
     
     
-    def highlight_selected_text(self) -> None:
-        """Highlight the currently selected text in the TextArea."""
-        text_area = self.query_one("#text-area", TextArea)
+    def _extract_selected_text(self, text_area: TextArea) -> str:
+        """Extract and verify selected text from TextArea."""
+        selected_text = text_area.selected_text
         selection = text_area.selection
         
-        if selection.start == selection.end:
-            # No text selected
-            debug_log("No text selected for highlighting")
-            return
-            
-        # Get the selected text
-        selected_text = text_area.selected_text
         debug_log(f"Highlighting text: '{selected_text}'")
         debug_log(f"Selection start: {selection.start}, end: {selection.end}")
-        debug_log(f"Selected text length: {len(selected_text)}")
         
         # Manual text extraction to verify
         start_row, start_col = selection.start
@@ -800,22 +1041,44 @@ class EPUBReader(App):
                 selected_text = manual_text
                 debug_log(f"Using manual extraction: '{selected_text}'")
         
+        return selected_text
+    
+    def _create_highlight_data(self, selection, selected_text: str) -> tuple:
+        """Create highlight data tuple with current color."""
+        # Get current selected color and convert to full name
+        color_name, _ = self.highlight_colors[self.current_color_index]
+        full_color_name = ColorManager.get_full_color_name(color_name)
+        
+        # Wrap text with color brackets
+        bracketed_text = ColorManager.wrap_text_with_color(selected_text, full_color_name)
+        
+        return (selection.start, selection.end, bracketed_text, "", full_color_name)
+    
+    def highlight_selected_text(self) -> None:
+        """Highlight the currently selected text in the TextArea."""
+        text_area = self.query_one("#text-area", TextArea)
+        selection = text_area.selection
+        
+        if selection.start == selection.end:
+            debug_log("No text selected for highlighting")
+            return
+        
+        # Extract and verify selected text
+        selected_text = self._extract_selected_text(text_area)
+        
         # Store the highlight for this page
         page_num = self.current_page
         if page_num not in self.highlights:
             self.highlights[page_num] = []
         
-        # Add this highlight to the page's highlights (with empty note initially)
-        highlight_data = (selection.start, selection.end, selected_text, "")
+        # Create and store highlight data
+        highlight_data = self._create_highlight_data(selection, selected_text)
         self.highlights[page_num].append(highlight_data)
         debug_log(f"Stored highlight for page {page_num}: {highlight_data}")
         
-        # Apply simple text replacement highlighting (no Rich markup)
+        # Update displays and save
         self.apply_simple_highlighting()
-        
-        # Update highlights list in notes panel
         self.update_highlights_list()
-        # Save highlights to file
         self.save_highlights()
     
     def apply_simple_highlighting(self) -> None:
@@ -834,98 +1097,122 @@ class EPUBReader(App):
         # Sort highlights by position (reverse order to avoid position shifts)
         sorted_highlights = sorted(self.highlights[page_num], key=lambda h: h[0], reverse=True)
         
-        for _, _, selected_text, note in sorted_highlights:
-            # Determine bracket type based on note or default to yellow
-            if note and note.startswith("GREEN:"):
-                highlighted_version = f'{{{selected_text}}}'  # Green curly braces
-            elif note and note.startswith("RED:"):
-                highlighted_version = f'<{selected_text}>'    # Red angle brackets
-            elif note and note.startswith("BLUE:"):
-                highlighted_version = f'«{selected_text}»'    # Blue guillemets
-            else:
-                highlighted_version = f'[{selected_text}]'    # Default yellow square brackets
+        for highlight in sorted_highlights:
+            _, _, selected_text, note, color = parse_highlight_tuple(highlight)
+            # The text already has proper color brackets, use as-is
+            highlighted_version = selected_text
             
-            highlighted_text = highlighted_text.replace(selected_text, highlighted_version)
+            # Extract the text without brackets for replacement
+            clean_text = selected_text.strip('[]{}()<>«»⟨⟩')
+            highlighted_text = highlighted_text.replace(clean_text, highlighted_version)
         
         text_area.text = highlighted_text
         debug_log(f"Applied bracket highlighting to page {page_num}")
     
-    def update_highlights_list(self) -> None:
-        """Update the highlights ListView with all highlights from all pages."""
-        highlights_list = self.query_one("#highlights-list", ListView)
-        highlights_list.clear()
-        
-        # Collect all highlights from all pages
+    def _collect_all_highlights(self) -> list:
+        """Collect and sort all highlights from all pages."""
         all_highlights = []
         for page_num, page_highlights in self.highlights.items():
-            for start_pos, end_pos, text, note in page_highlights:
+            for highlight in page_highlights:
+                start_pos, end_pos, text, note, color = parse_highlight_tuple(highlight)
                 start_row, start_col = start_pos
-                all_highlights.append((page_num, text, text, start_row, start_col, note))
+                all_highlights.append((page_num, text, text, start_row, start_col, note, color))
         
         # Sort highlights by page number, then by position in text
         all_highlights.sort(key=lambda x: (x[0], x[3], x[4]))  # page, start_row, start_col
-        
-        # Add highlights to ListView
-        for page_num, display_text, full_text, start_row, start_col, note in all_highlights:
-            # Create styled display with white page number and yellow highlight
-            page_part = f"[white]Page {page_num + 1}:[/white]"
-            highlight_part = f"[#fbdda7]{full_text}[/#fbdda7]"
-            display_text = f"{page_part} {highlight_part}"
-            
-            # Create vertical layout with display text and editable textarea for note only
-            note_area = TextArea(
-                text=note if note else "",
-                id=f"note_{page_num}_{start_row}_{start_col}",
-                read_only=False
-            )
-            note_area.show_line_numbers = False
-            
-            content = Vertical(
-                Label(display_text),
-                note_area
-            )
-            
-            highlight_item = ListItem(content)
-            # Store full data as metadata for note editing
-            highlight_item.highlight_data = (page_num, full_text, start_row, start_col, note)
-            highlights_list.append(highlight_item)
-        
-        debug_log(f"Updated highlights list with {len(all_highlights)} highlights")
+        return all_highlights
     
+    def _create_highlight_list_item(self, page_num: int, full_text: str, start_row: int, 
+                                   start_col: int, note: str, color: str) -> ListItem:
+        """Create a ListView item for a highlight."""
+        # Get hex color for display
+        hex_color = ColorManager.get_hex(color)
+        
+        # Strip bracket characters from the text for clean display
+        clean_text = ColorManager.strip_brackets(full_text, color)
+        
+        # Create styled display with white page number and proper color highlight
+        page_part = f"[white]Page {page_num + 1}:[/white]"
+        highlight_part = f"[{hex_color}]{clean_text}[/{hex_color}]"
+        display_text = f"{page_part} {highlight_part}"
+        
+        # Create vertical layout with display text and editable textarea for note
+        note_area = TextArea(
+            text=note if note else "",
+            id=f"note_{page_num}_{start_row}_{start_col}",
+            read_only=False
+        )
+        note_area.show_line_numbers = False
+        
+        content = Vertical(Label(display_text), note_area)
+        highlight_item = ListItem(content)
+        
+        # Store full data as metadata for note editing
+        highlight_item.highlight_data = (page_num, full_text, start_row, start_col, note)
+        return highlight_item
     
-    def apply_highlight_markup(self, text: str, highlights: list) -> str:
-        """Apply Rich markup to highlight text segments."""
-        # Sort highlights by start position (reverse order to avoid position shifts)
-        sorted_highlights = sorted(highlights, key=lambda h: h[0], reverse=True)
+    def update_highlights_list(self) -> None:
+        """Update the highlights ListView with all highlights and marks from all pages."""
+        highlights_list = self.query_one("#highlights-list", ListView)
+        highlights_list.clear()
         
-        # Convert text to list of lines for easier manipulation
-        lines = text.split('\n')
+        # Collect all highlights and marks, then sort by position
+        all_items = []
         
-        for start_pos, end_pos, _ in sorted_highlights:
-            start_row, start_col = start_pos
-            end_row, end_col = end_pos
-            
-            if start_row < len(lines) and end_row < len(lines):
-                if start_row == end_row:
-                    # Single line highlight
-                    line = lines[start_row]
-                    highlighted_line = (
-                        line[:start_col] + 
-                        f"[bold yellow on blue]{line[start_col:end_col]}[/bold yellow on blue]" +
-                        line[end_col:]
-                    )
-                    lines[start_row] = highlighted_line
+        # Add highlights
+        all_highlights = self._collect_all_highlights()
+        for page_num, _, full_text, start_row, start_col, note, color in all_highlights:
+            all_items.append(('highlight', page_num, start_row, start_col, full_text, note, color))
+        
+        # Add marks (handle both old and new mark formats)
+        for mark in self.marks:
+            if len(mark) == 6:
+                # New format: (page_num, start_row, start_col, selected_text, mark_name, timestamp)
+                page_num, start_row, start_col, selected_text, mark_name, timestamp = mark
+            else:
+                # Old format or incomplete mark - use defaults
+                if len(mark) == 5:
+                    page_num, start_row, start_col, selected_text, mark_name = mark
                 else:
-                    # Multi-line highlight (for future enhancement)
-                    # For now, just highlight the first line
-                    line = lines[start_row]
-                    highlighted_line = (
-                        line[:start_col] + 
-                        f"[bold yellow on blue]{line[start_col:]}[/bold yellow on blue]"
-                    )
-                    lines[start_row] = highlighted_line
+                    debug_log(f"Unexpected mark format with {len(mark)} values: {mark}")
+                    continue
+                timestamp = 0
+            all_items.append(('mark', page_num, start_row, start_col, selected_text, mark_name, None))
         
-        return '\n'.join(lines)
+        # Sort by position (page, row, col)
+        all_items.sort(key=lambda x: (x[1], x[2], x[3]))
+        
+        # Create list items
+        for item in all_items:
+            if item[0] == 'highlight':
+                _, page_num, start_row, start_col, full_text, note, color = item
+                highlight_item = self._create_highlight_list_item(
+                    page_num, full_text, start_row, start_col, note, color
+                )
+                highlights_list.append(highlight_item)
+            elif item[0] == 'mark':
+                _, page_num, start_row, start_col, selected_text, mark_name, _ = item
+                mark_item = self._create_mark_list_item(page_num, mark_name, selected_text)
+                highlights_list.append(mark_item)
+        
+        debug_log(f"Updated highlights list with {len(all_highlights)} highlights and {len(self.marks)} marks")
+    
+    
+    
+    def _create_mark_list_item(self, page_num: int, mark_name: str, selected_text: str) -> ListItem:
+        """Create a ListItem for a mark."""
+        # Create mark button similar to TEST MARK
+        mark_button = Button(f"{mark_name.upper()} ▼", id=f"mark-{mark_name.lower().replace(' ', '-')}")
+        mark_button.can_focus = False
+        mark_button.active_effect_duration = 0
+        mark_button.styles.color = "#ffffff"
+        mark_button.styles.width = "100%"
+        mark_button.styles.text_align = "left"
+        mark_button.styles.margin = (1, 0, 0, 0)
+        
+        # Create and return the ListItem with the button as content
+        item = ListItem(mark_button)
+        return item
     
     def watch_current_page(self) -> None:
         counter_widget = self.query_one("#counter", Static)
@@ -958,18 +1245,65 @@ class EPUBReader(App):
                 with open('highlights.pkl', 'rb') as f:
                     self.highlights = pickle.load(f)
                 debug_log(f"Loaded {len(self.highlights)} pages of highlights")
+                
+                # Convert old format highlights to new format with default yellow color
+                for page_num, page_highlights in self.highlights.items():
+                    updated_highlights = []
+                    for highlight in page_highlights:
+                        if len(highlight) == 4:
+                            # Old format: (start_pos, end_pos, text, note)
+                            start_pos, end_pos, text, note = highlight
+                            # Add yellow as default color, ensure text has yellow brackets
+                            if not (text.startswith('[') and text.endswith(']')):
+                                # Add yellow brackets if they're missing
+                                clean_text = text.strip('[]{}()<>«»⟨⟩')
+                                text = f"[{clean_text}]"
+                            updated_highlights.append((start_pos, end_pos, text, note, "yellow"))
+                        else:
+                            # New format: keep as-is
+                            updated_highlights.append(highlight)
+                    self.highlights[page_num] = updated_highlights
+                    
+                debug_log("Converted old highlight format to new format with colors")
             else:
                 debug_log("No highlights file found, starting fresh")
         except Exception as e:
             debug_log(f"Error loading highlights: {e}")
-            self.highlights = {}
+            
+        # Load marks
+        self.load_marks()
+    
+    def save_marks(self) -> None:
+        """Save marks to a pickle file."""
+        try:
+            with open('marks.pkl', 'wb') as f:
+                pickle.dump(self.marks, f)
+            debug_log(f"Saved {len(self.marks)} marks")
+        except Exception as e:
+            debug_log(f"Error saving marks: {e}")
+    
+    def load_marks(self) -> None:
+        """Load marks from a pickle file."""
+        try:
+            with open('marks.pkl', 'rb') as f:
+                self.marks = pickle.load(f)
+            debug_log(f"Loaded {len(self.marks)} marks")
+        except FileNotFoundError:
+            debug_log("No marks file found, starting fresh")
+            self.marks = []
+        except Exception as e:
+            debug_log(f"Error loading marks: {e}")
+            self.marks = []
     
     def on_mount(self) -> None:
         """Called when the app is mounted and ready."""
         # Now that the UI is ready, update displays with loaded highlights
         if self.highlights:
-            self.update_highlights_list()
+            # Don't show highlights initially - let the dropdown control visibility
             self.apply_simple_highlighting()
+        
+        # Update the highlights list to show marks and highlights
+        self.update_highlights_list()
         
         # Force override the ListView background after mounting
         try:
