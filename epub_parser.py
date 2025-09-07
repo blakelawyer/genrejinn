@@ -14,7 +14,7 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, Center, Middle
 from textual.screen import Screen
-from textual.widgets import Button, Static, TextArea, ProgressBar, ListView, ListItem, Label, OptionList, Input
+from textual.widgets import Button, Static, TextArea, ProgressBar, ListView, ListItem, Label, OptionList, Input, Markdown
 from textual.screen import ModalScreen
 
 # Try to import textual-image for image display
@@ -548,6 +548,17 @@ class EPUBReader(App):
         padding: 0;
         margin: 0;
         background: #1f1f39;
+    }
+    
+    /* Make URLs in TextAreas clickable hyperlinks */
+    TextArea {
+        link-color: #b3e3f2;
+        link-background: transparent;
+        link-style: underline;
+    }
+    
+    TextArea:hover {
+        link-color: #ffffff;
     }
     
     """
@@ -1494,6 +1505,9 @@ class EPUBReader(App):
             processed_note_text, _ = self.process_note_for_images(note)
         
         # Create vertical layout with display text and editable textarea for note
+        # Check if we're in server mode to enable link detection
+        is_server_mode = os.environ.get('GENREJINN_SERVER_MODE') == '1'
+        
         note_area = TextArea(
             text=processed_note_text,
             id=f"note_{page_num}_{start_row}_{start_col}",
@@ -1501,11 +1515,29 @@ class EPUBReader(App):
         )
         note_area.show_line_numbers = False
         
+        # Enable link detection in server mode
+        if is_server_mode:
+            # Try to enable link detection if the TextArea supports it
+            try:
+                if hasattr(note_area, 'detect_links'):
+                    note_area.detect_links = True
+                    debug_log("Enabled link detection for TextArea")
+            except Exception as e:
+                debug_log(f"Could not enable link detection: {e}")
+        
         # Process images and get the widgets to insert above the note
         image_widgets = self._get_image_widgets_for_note(note if note else "")
         
-        # Create content layout: just label and textarea (no images)
-        content_widgets = [Label(display_text), note_area]
+        # Create content layout
+        content_widgets = [Label(display_text)]
+        
+        # In server mode, add markdown links between images and textarea
+        if is_server_mode and note:
+            markdown_links = self._create_image_markdown_links(note)
+            if markdown_links:
+                content_widgets.append(markdown_links)
+        
+        content_widgets.append(note_area)
         
         content = Vertical(*content_widgets)
         highlight_item = ListItem(content)
@@ -1548,6 +1580,35 @@ class EPUBReader(App):
                 image_widgets.append(placeholder)
                 
         return image_widgets
+    
+    def _create_image_markdown_links(self, note_text: str) -> Markdown:
+        """Create a Markdown widget with clickable image links for server mode."""
+        if not note_text:
+            return None
+            
+        # Find image URLs in the note
+        image_pattern = r'https?://[^\s]+\.(?:jpg|png)(?:\?[^\s]*)?'
+        image_urls = re.findall(image_pattern, note_text, re.IGNORECASE)
+        
+        if not image_urls:
+            return None
+        
+        # Create Markdown content with clickable links
+        markdown_content = "**Image Links:**\n\n"
+        for url in image_urls:
+            # Extract filename for display text
+            try:
+                filename = os.path.basename(urllib.parse.urlparse(url).path)
+                if not filename or filename == '/' or '.' not in filename:
+                    filename = f"Image {len(markdown_content.split('- '))}"
+            except:
+                filename = f"Image {len(markdown_content.split('- '))}"
+            
+            markdown_content += f"- [{filename}]({url})\n"
+        
+        # Create and style the Markdown widget
+        markdown_widget = Markdown(markdown_content, id=f"image-links-{hash(note_text) % 10000}")
+        return markdown_widget
     
     def update_highlights_list(self) -> None:
         """Update the highlights ListView with marks and notes, respecting mark hierarchy."""
