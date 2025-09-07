@@ -642,8 +642,11 @@ class EPUBReader(App):
                 
                 if not is_server_mode:
                     # In local mode, hide the URL (original behavior)
+                    debug_log(f"Local mode: hiding URL {url}")
                     processed_text = processed_text.replace(url, "")
-                # In server mode, keep the URL visible as plain text
+                else:
+                    # In server mode, keep the URL visible as plain text
+                    debug_log(f"Server mode: keeping URL visible {url}")
         
         # Clean up extra whitespace only if URLs were removed (local mode)
         if not is_server_mode:
@@ -651,37 +654,6 @@ class EPUBReader(App):
         
         return processed_text, image_data
     
-    def _process_note_images(self, note_text: str) -> list:
-        """Process note text for images and return list of image widgets."""
-        image_widgets = []
-        
-        if not note_text:
-            debug_log("No note text provided for image processing")
-            return image_widgets
-            
-        processed_text, image_data = self.process_note_for_images(note_text)
-        debug_log(f"Found {len(image_data)} image data: {image_data}")
-        
-        # Create image widgets for each downloaded image
-        for url, image_path in image_data:
-            try:
-                if TEXTUAL_IMAGE_AVAILABLE:
-                    debug_log(f"Creating TextualImage widget for {image_path}")
-                    image_widget = TextualImage(image_path)
-                    image_widgets.append(image_widget)
-                    debug_log(f"Successfully created TextualImage widget")
-                elif IMAGEVIEW_AVAILABLE:
-                    debug_log(f"Creating ImageViewer widget for {image_path}")
-                    image_widget = ImageViewer(image_path) 
-                    image_widgets.append(image_widget)
-                    debug_log(f"Successfully created ImageViewer widget")
-                else:
-                    debug_log("No image display libraries available")
-            except Exception as e:
-                debug_log(f"Failed to create image widget for {image_path}: {e}")
-        
-        debug_log(f"Returning {len(image_widgets)} image widgets")
-        return image_widgets
     
     def _reconstruct_note_with_urls(self, page_num: int, start_row: int, start_col: int, processed_text: str) -> str:
         """Reconstruct the original note with URLs from the existing highlight data."""
@@ -1867,32 +1839,6 @@ class EPUBReader(App):
             debug_log(f"Error creating image widget for {image_path}: {e}")
             return Static(f"[Image Error: {image_path}]")
 
-    def _process_note_images(self, note_text: str) -> list:
-        """Process a note's text and return list of image widgets for any found images."""
-        image_widgets = []
-        
-        if not note_text:
-            return image_widgets
-        
-        # Find image references in the note
-        image_refs = self._parse_image_references(note_text)
-        
-        for img_ref in image_refs:
-            # Check if it's a URL that needs downloading
-            if img_ref.startswith(('http://', 'https://')):
-                local_path = self.download_image(img_ref)
-                if local_path:
-                    widget = self._create_image_widget(local_path)
-                    image_widgets.append(widget)
-            else:
-                # Local file reference
-                if os.path.exists(img_ref):
-                    widget = self._create_image_widget(img_ref)
-                    image_widgets.append(widget)
-                else:
-                    debug_log(f"Local image file not found: {img_ref}")
-        
-        return image_widgets
 
     def save_current_page(self) -> None:
         """Save the current page number to a file."""
