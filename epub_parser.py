@@ -858,6 +858,9 @@ class EPUBReader(App):
                     yield highlights_list
     
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        # Check if we're in server mode
+        is_server_mode = os.environ.get('GENREJINN_SERVER_MODE') == '1'
+        
         # Add visual feedback to all buttons
         self._add_button_press_feedback(event.button)
         
@@ -873,19 +876,24 @@ class EPUBReader(App):
             self.current_page -= 1
             self.save_current_page()  # Save page whenever it changes
         elif event.button.id == "mark":
-            self.create_simple_mark()
+            if not is_server_mode:
+                self.create_simple_mark()
         elif event.button.id == "highlight":
-            self.highlight_selected_text()
+            if not is_server_mode:
+                self.highlight_selected_text()
         elif event.button.id == "save-note":
-            # Check if we have a pending mark to save, otherwise save focused note
-            if hasattr(self, '_pending_mark'):
-                self.save_pending_mark()
-            else:
-                self.save_focused_note()
+            if not is_server_mode:
+                # Check if we have a pending mark to save, otherwise save focused note
+                if hasattr(self, '_pending_mark'):
+                    self.save_pending_mark()
+                else:
+                    self.save_focused_note()
         elif event.button.id == "delete-highlight":
-            self.delete_focused_highlight()
+            if not is_server_mode:
+                self.delete_focused_highlight()
         elif event.button.id == "color-button":
-            self.cycle_color()
+            if not is_server_mode:
+                self.cycle_color()
     
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle Enter key in input fields."""
