@@ -29,12 +29,44 @@ except ImportError:
 from textual.widgets.text_area import TextAreaTheme
 from rich.style import Style
 from textual.reactive import reactive
+from textual.events import Click
+import webbrowser
 from syntax.manager import tree_sitter_language
 # Debug logging function
 def debug_log(message):
     with open('log.txt', 'a') as f:
         f.write(f"{message}\n")
         f.flush()
+
+# Custom clickable image widget
+class ClickableImage(Vertical):
+    """A clickable image widget that opens URL when clicked."""
+    
+    def __init__(self, image_path: str, image_url: str, **kwargs):
+        super().__init__(**kwargs)
+        self.image_url = image_url
+        self.image_path = image_path
+        
+        # Create the actual image widget
+        if TEXTUAL_IMAGE_AVAILABLE:
+            self.image_widget = TextualImage(image_path)
+        elif IMAGEVIEW_AVAILABLE:
+            self.image_widget = ImageViewer(image_path)
+        else:
+            self.image_widget = Static(f"Image: {os.path.basename(image_path)}")
+            
+        self.image_widget.add_class("note-image")
+    
+    def compose(self) -> ComposeResult:
+        yield self.image_widget
+    
+    def on_click(self, event: Click) -> None:
+        """Open the image URL in browser when clicked."""
+        debug_log(f"Image clicked, opening URL: {self.image_url}")
+        try:
+            webbrowser.open(self.image_url)
+        except Exception as e:
+            debug_log(f"Error opening URL: {e}")
 
 # Color management system
 
@@ -489,6 +521,16 @@ class EPUBReader(App):
         align: center middle;
     }
     
+    /* Clickable image container styling */
+    ClickableImage {
+        border: solid transparent;
+    }
+    
+    ClickableImage:hover {
+        border: solid #9aa4ca;
+        background: #2a2a5a;
+    }
+    
     /* Remove borders from ListItems containing images */
     ListView ListItem.image-container {
         border: none;
@@ -570,25 +612,25 @@ class EPUBReader(App):
             return None
     
     def process_note_for_images(self, note_text: str) -> tuple:
-        """Process note text to find and download image URLs, return (processed_text, image_paths)."""
+        """Process note text to find and download image URLs, return (processed_text, image_data)."""
         # Pattern to find URLs ending in .jpg or .png
         image_pattern = r'https?://[^\s]+\.(?:jpg|png)(?:\?[^\s]*)?'
         
         image_urls = re.findall(image_pattern, note_text, re.IGNORECASE)
-        image_paths = []
+        image_data = []  # List of (url, filepath) tuples
         processed_text = note_text
         
         for url in image_urls:
             filepath = self.download_image(url)
             if filepath:
-                image_paths.append(filepath)
+                image_data.append((url, filepath))
                 # Replace the URL with empty string to hide it
                 processed_text = processed_text.replace(url, "")
         
         # Clean up extra whitespace
         processed_text = re.sub(r'\s+', ' ', processed_text).strip()
         
-        return processed_text, image_paths
+        return processed_text, image_data
     
     def _process_note_images(self, note_text: str) -> list:
         """Process note text for images and return list of image widgets."""
@@ -598,11 +640,11 @@ class EPUBReader(App):
             debug_log("No note text provided for image processing")
             return image_widgets
             
-        processed_text, image_paths = self.process_note_for_images(note_text)
-        debug_log(f"Found {len(image_paths)} image paths: {image_paths}")
+        processed_text, image_data = self.process_note_for_images(note_text)
+        debug_log(f"Found {len(image_data)} image data: {image_data}")
         
         # Create image widgets for each downloaded image
-        for image_path in image_paths:
+        for url, image_path in image_data:
             try:
                 if TEXTUAL_IMAGE_AVAILABLE:
                     debug_log(f"Creating TextualImage widget for {image_path}")
@@ -631,8 +673,8 @@ class EPUBReader(App):
                 if start_pos == (start_row, start_col):
                     # Check if original note has URLs that were processed out
                     if original_note:
-                        _, original_image_paths = self.process_note_for_images(original_note)
-                        if original_image_paths:
+                        _, original_image_data = self.process_note_for_images(original_note)
+                        if original_image_data:
                             # The processed text might be missing URLs, keep the original URLs
                             # But allow other text to be updated
                             image_pattern = r'https?://[^\s]+\.(?:jpg|png)(?:\?[^\s]*)?'
@@ -1483,39 +1525,27 @@ class EPUBReader(App):
         return highlight_item, image_widgets
     
     def _get_image_widgets_for_note(self, note_text: str) -> list:
-        """Process note text and return list of image widgets."""
+        """Process note text and return list of clickable image widgets."""
         image_widgets = []
         
         if not note_text:
             return image_widgets
             
         debug_log(f"Processing images for note: {note_text[:100]}...")
-        processed_text, image_paths = self.process_note_for_images(note_text)
-        debug_log(f"Found {len(image_paths)} image paths: {image_paths}")
+        processed_text, image_data = self.process_note_for_images(note_text)
+        debug_log(f"Found {len(image_data)} images: {image_data}")
         
-        # Create image widgets for each downloaded image
-        for image_path in image_paths:
+        # Create clickable image widgets for each downloaded image
+        for url, image_path in image_data:
             try:
-                if TEXTUAL_IMAGE_AVAILABLE:
-                    debug_log(f"Creating TextualImage widget: {image_path}")
-                    image_widget = TextualImage(image_path)
-                    image_widget.add_class("note-image")
-                    image_widgets.append(image_widget)
-                    debug_log(f"Successfully created TextualImage widget")
-                elif IMAGEVIEW_AVAILABLE:
-                    debug_log(f"Creating ImageViewer widget: {image_path}")
-                    image_widget = ImageViewer(image_path)
-                    image_widget.add_class("note-image") 
-                    image_widgets.append(image_widget)
-                    debug_log(f"Successfully created ImageViewer widget")
-                else:
-                    debug_log("No image library available, creating placeholder")
-                    placeholder = Static(f"Image: {os.path.basename(image_path)}")
-                    placeholder.add_class("note-image")
-                    image_widgets.append(placeholder)
+                debug_log(f"Creating clickable image widget for: {image_path} -> {url}")
+                clickable_image = ClickableImage(image_path, url)
+                clickable_image.add_class("note-image")
+                image_widgets.append(clickable_image)
+                debug_log(f"Successfully created clickable image widget")
                     
             except Exception as e:
-                debug_log(f"Error creating image widget: {e}")
+                debug_log(f"Error creating clickable image widget: {e}")
                 placeholder = Static(f"Error loading: {os.path.basename(image_path)}")
                 placeholder.add_class("note-image")
                 image_widgets.append(placeholder)
