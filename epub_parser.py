@@ -9,11 +9,13 @@ import urllib.request
 import urllib.parse
 import requests
 import argparse
+import time
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, Center, Middle
 from textual.screen import Screen
 from textual.widgets import Button, Static, TextArea, ProgressBar, ListView, ListItem, Label, OptionList, Input
+from textual.screen import ModalScreen
 
 # Try to import textual-image for image display
 try:
@@ -84,55 +86,60 @@ class ClickableImage(Vertical):
                 debug_log(f"Error opening URL: {e}")
     
     def _open_url_server_mode(self, url: str) -> None:
-        """Open URL in server mode by writing URL to stdout and using notification."""
+        """Open URL in server mode using nginx-served images directory."""
         try:
-            debug_log(f"Attempting to open URL in server mode: {url}")
+            debug_log(f"Creating nginx-served URL for: {url}")
             
-            # Method 1: Write URL to stdout which might be captured by textual-serve
-            print(f"\nIMAGE URL: {url}", flush=True)
-            
-            # Method 2: Try to get the app to show a notification or message
-            app = self.app
-            try:
-                app.bell()  # Audio notification if supported
-                debug_log("Bell notification sent")
-            except:
-                pass
-            
-            # Method 3: Try terminal hyperlink escape sequences
-            try:
-                if hasattr(app, '_driver'):
-                    # Send hyperlink escape sequence directly to stdout
-                    hyperlink = f'\033]8;;{url}\033\\🔗 Open Image\033]8;;\033\\'
-                    print(hyperlink, flush=True)
-                    debug_log("Sent hyperlink escape sequence to stdout")
-            except Exception as e:
-                debug_log(f"Hyperlink escape sequence failed: {e}")
-            
-            # Method 4: Create a temporary notification in the app
-            try:
-                # Try to push a message to the app that might show the URL
-                from textual.message import Message
-                class URLMessage(Message):
-                    def __init__(self, url: str):
-                        self.url = url
-                        super().__init__()
+            # Get the local image filename
+            local_image_path = self._get_local_image_path(url)
+            if local_image_path and os.path.exists(local_image_path):
+                # Create URL pointing to nginx-served images directory
+                filename = os.path.basename(local_image_path)
+                base_url = os.environ.get('TEXTUAL_PUBLIC_URL', 'http://localhost:8000')
                 
-                app.post_message(URLMessage(url))
-                debug_log("Posted URL message to app")
-            except Exception as e:
-                debug_log(f"URL message posting failed: {e}")
-            
-            # Method 5: Try webbrowser as final fallback
-            try:
-                webbrowser.open(url)
-                debug_log("webbrowser.open() called as fallback")
-            except Exception as e:
-                debug_log(f"webbrowser.open() failed: {e}")
+                # Create nginx URL for the image
+                nginx_url = f"{base_url}/images/{filename}"
+                debug_log(f"Created nginx URL: {nginx_url}")
+                
+                # Try to open the nginx URL
+                try:
+                    webbrowser.open(nginx_url)
+                    debug_log(f"Opened nginx URL: {nginx_url}")
+                except Exception as e:
+                    debug_log(f"Failed to open nginx URL: {e}")
+                    # Fallback: print the nginx URL
+                    print(f"\nIMAGE NGINX URL: {nginx_url}", flush=True)
+            else:
+                debug_log(f"Local image not found, falling back to original URL")
+                # Fallback to original URL
+                print(f"\nIMAGE URL: {url}", flush=True)
+                try:
+                    webbrowser.open(url)
+                except:
+                    pass
                 
         except Exception as e:
-            debug_log(f"All server mode URL opening methods failed: {e}")
+            debug_log(f"Server mode nginx URL creation failed: {e}")
             print(f"Manual URL to copy/paste: {url}", flush=True)
+    
+    def _get_local_image_path(self, url: str) -> str:
+        """Get the local file path for a downloaded image URL."""
+        try:
+            # Extract filename from URL
+            parsed_url = urllib.parse.urlparse(url)
+            filename = os.path.basename(parsed_url.path)
+            
+            # If no filename, generate one based on URL hash
+            if not filename or '.' not in filename:
+                filename = f"image_{hash(url) % 10000}.jpg"
+            
+            local_path = Path("images") / filename
+            return str(local_path) if local_path.exists() else None
+            
+        except Exception as e:
+            debug_log(f"Error getting local image path: {e}")
+            return None
+    
 
 # Color management system
 
