@@ -640,13 +640,10 @@ class EPUBReader(App):
             if filepath:
                 image_data.append((url, filepath))
                 
-                if is_server_mode:
-                    # In server mode, convert URL to a hyperlink using rich markup
-                    hyperlink = f"[link={url}]{url}[/link]"
-                    processed_text = processed_text.replace(url, hyperlink)
-                else:
+                if not is_server_mode:
                     # In local mode, hide the URL (original behavior)
                     processed_text = processed_text.replace(url, "")
+                # In server mode, keep the URL visible as plain text
         
         # Clean up extra whitespace only if URLs were removed (local mode)
         if not is_server_mode:
@@ -1525,20 +1522,9 @@ class EPUBReader(App):
         if note:
             processed_note_text, _ = self.process_note_for_images(note)
         
-        # Always create the editable TextArea
-        # For server mode, we'll strip hyperlink markup for editing
-        import sys
-        is_server_mode = '--server' in sys.argv
-        
-        # Clean text for TextArea (remove markup)
-        clean_text_for_editing = processed_note_text
-        if is_server_mode and '[link=' in processed_note_text:
-            # Remove markup but keep URLs visible
-            import re
-            clean_text_for_editing = re.sub(r'\[link=([^\]]+)\]([^\[]+)\[/link\]', r'\2', processed_note_text)
-        
+        # Create vertical layout with display text and editable textarea for note
         note_area = TextArea(
-            text=clean_text_for_editing,
+            text=processed_note_text,
             id=f"note_{page_num}_{start_row}_{start_col}",
             read_only=False
         )
@@ -1547,23 +1533,8 @@ class EPUBReader(App):
         # Process images and get the widgets to insert above the note
         image_widgets = self._get_image_widgets_for_note(note if note else "")
         
-        # Create content layout
+        # Create content layout: just label and textarea (no images)
         content_widgets = [Label(display_text), note_area]
-        
-        # In server mode, add a clickable hyperlink display below the TextArea
-        if is_server_mode and processed_note_text and '[link=' in processed_note_text:
-            from textual.widgets import Static as RichStatic
-            hyperlink_display = RichStatic(
-                processed_note_text,
-                markup=True,
-                id=f"hyperlinks_{page_num}_{start_row}_{start_col}"
-            )
-            hyperlink_display.styles.margin = (1, 0, 0, 0)
-            hyperlink_display.styles.padding = 1
-            hyperlink_display.styles.background = "#2f2f49"
-            hyperlink_display.styles.color = "#b3e3f2"
-            hyperlink_display.styles.border = ("solid", "#9aa4ca")
-            content_widgets.append(hyperlink_display)
         
         content = Vertical(*content_widgets)
         highlight_item = ListItem(content)
