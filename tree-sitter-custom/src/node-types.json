@@ -100,6 +100,11 @@
     }
   },
   {
+    "type": "yellow_content",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "yellow_highlight",
     "named": true,
     "fields": {},
@@ -123,11 +128,15 @@
     "named": false
   },
   {
-    "type": "[",
+    "type": "[[",
     "named": false
   },
   {
     "type": "]",
+    "named": false
+  },
+  {
+    "type": "]]",
     "named": false
   },
   {
@@ -152,10 +161,6 @@
   },
   {
     "type": "white_content",
-    "named": true
-  },
-  {
-    "type": "yellow_content",
     "named": true
   },
   {

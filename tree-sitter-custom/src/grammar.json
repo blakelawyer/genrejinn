@@ -44,14 +44,14 @@
     },
     "text": {
       "type": "PATTERN",
-      "value": "[^\\n\\[\\]{}<>«»|]+"
+      "value": "[^\\n{}<>«»|]+"
     },
     "yellow_highlight": {
       "type": "SEQ",
       "members": [
         {
           "type": "STRING",
-          "value": "["
+          "value": "[["
         },
         {
           "type": "SYMBOL",
@@ -59,7 +59,7 @@
         },
         {
           "type": "STRING",
-          "value": "]"
+          "value": "]]"
         }
       ]
     },
@@ -132,8 +132,29 @@
       ]
     },
     "yellow_content": {
-      "type": "PATTERN",
-      "value": "[^\\]]+"
+      "type": "REPEAT1",
+      "content": {
+        "type": "CHOICE",
+        "members": [
+          {
+            "type": "PATTERN",
+            "value": "[^\\]]"
+          },
+          {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "]"
+              },
+              {
+                "type": "PATTERN",
+                "value": "[^\\]]"
+              }
+            ]
+          }
+        ]
+      }
     },
     "green_content": {
       "type": "PATTERN",

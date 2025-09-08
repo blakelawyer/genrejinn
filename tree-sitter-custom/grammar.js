@@ -14,12 +14,12 @@ module.exports = grammar({
       $.newline
     ),
 
-    text: $ => /[^\n\[\]{}<>«»|]+/,
+    text: $ => /[^\n{}<>«»|]+/,
     
     yellow_highlight: $ => seq(
-      '[',
+      '[[',
       $.yellow_content,
-      ']'
+      ']]'
     ),
     
     green_highlight: $ => seq(
@@ -46,7 +46,10 @@ module.exports = grammar({
       '|'
     ),
     
-    yellow_content: $ => /[^\]]+/,
+    yellow_content: $ => repeat1(choice(
+      /[^\]]/,
+      seq(']', /[^\]]/)
+    )),
     green_content: $ => /[^}]+/,
     red_content: $ => /[^>]+/,
     blue_content: $ => /[^»]+/,

@@ -1,7 +1,7 @@
 (yellow_highlight) @highlight.yellow
 (yellow_content) @highlight.yellow.content
-"[" @highlight.yellow.bracket
-"]" @highlight.yellow.bracket
+"[[" @highlight.yellow.bracket
+"]]" @highlight.yellow.bracket
 
 (green_highlight) @highlight.green
 (green_content) @highlight.green.content

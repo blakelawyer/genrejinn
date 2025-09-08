@@ -95,7 +95,7 @@ class ColorManager:
     
     # Color brackets for text wrapping
     COLOR_BRACKETS = {
-        "yellow": ("[", "]"),
+        "yellow": ("[[", "]]"),
         "green": ("{", "}"),
         "red": ("<", ">"),
         "blue": ("«", "»"),
@@ -362,6 +362,17 @@ class EPUBReader(App):
         align: center middle;
     }
     
+    #search-controls {
+        height: auto;
+        align: center middle;
+        margin-top: 1;
+    }
+    
+    #search-input {
+        width: 1fr;
+        margin-right: 1;
+    }
+    
     #counter {
         text-align: center;
         width: 1fr;
@@ -587,6 +598,10 @@ class EPUBReader(App):
         self.button_feedback_active = {}
         # Marks for organizing highlights into sections
         self.marks = []  # List of (page_num, start_row, start_col, mark_text, mark_name, timestamp)
+        # Search functionality
+        self.search_term = ""
+        self.search_matches = []  # List of (page_number, match_position) tuples
+        self.current_search_index = -1
         # Load existing highlights
         self.load_highlights()
     
@@ -841,6 +856,18 @@ class EPUBReader(App):
                             delete_button.can_focus = False
                             delete_button.active_effect_duration = 0
                             yield delete_button
+                        with Horizontal(id="search-controls"):
+                            search_input = Input(placeholder="Search...", id="search-input")
+                            search_input.can_focus = True
+                            yield search_input
+                            prev_search_button = Button("<", id="prev-search")
+                            prev_search_button.can_focus = False
+                            prev_search_button.active_effect_duration = 0
+                            yield prev_search_button
+                            next_search_button = Button(">", id="next-search")
+                            next_search_button.can_focus = False
+                            next_search_button.active_effect_duration = 0
+                            yield next_search_button
                 with Vertical(id="notes-panel"):
                     yield Static("HIGHLIGHTS & NOTES", id="notes-title")
                     
@@ -894,12 +921,21 @@ class EPUBReader(App):
         elif event.button.id == "color-button":
             if not is_server_mode:
                 self.cycle_color()
+        elif event.button.id == "prev-search":
+            if not is_server_mode:
+                self.prev_search_match()
+        elif event.button.id == "next-search":
+            if not is_server_mode:
+                self.next_search_match()
     
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle Enter key in input fields."""
         if event.input.id == "mark-input":
             # Enter key saves the mark
             self.save_pending_mark()
+        elif event.input.id == "search-input":
+            # Enter key performs search
+            self.perform_search(event.input.value)
     
     
     def _add_button_press_feedback(self, button: Button) -> None:
@@ -1289,7 +1325,12 @@ class EPUBReader(App):
                 # Find the matching highlight by position
                 if start_pos == (start_row, start_col):
                     # Strip existing brackets and rewrap with new color
-                    clean_text = text.strip('[]{}()<>«»|')
+                    # Handle double brackets for yellow
+                    clean_text = text
+                    if clean_text.startswith('[[') and clean_text.endswith(']]'):
+                        clean_text = clean_text[2:-2]  # Remove [[ and ]]
+                    else:
+                        clean_text = clean_text.strip('[]{}()<>«»|')
                     new_text = ColorManager.wrap_text_with_color(clean_text, new_color)
                     
                     # Update the highlight data
@@ -1469,7 +1510,12 @@ class EPUBReader(App):
             highlighted_version = selected_text
             
             # Extract the text without brackets for replacement
-            clean_text = selected_text.strip('[]{}()<>«»|')
+            # Handle double brackets for yellow
+            clean_text = selected_text
+            if clean_text.startswith('[[') and clean_text.endswith(']]'):
+                clean_text = clean_text[2:-2]  # Remove [[ and ]]
+            else:
+                clean_text = clean_text.strip('[]{}()<>«»|')
             highlighted_text = highlighted_text.replace(clean_text, highlighted_version)
         
         text_area.text = highlighted_text
@@ -1813,10 +1859,15 @@ class EPUBReader(App):
                             # Old format: (start_pos, end_pos, text, note)
                             start_pos, end_pos, text, note = highlight
                             # Add yellow as default color, ensure text has yellow brackets
-                            if not (text.startswith('[') and text.endswith(']')):
+                            if not (text.startswith('[[') and text.endswith(']]')):
                                 # Add yellow brackets if they're missing
-                                clean_text = text.strip('[]{}()<>«»|')
-                                text = f"[{clean_text}]"
+                                # Handle both old single and new double brackets
+                                clean_text = text
+                                if clean_text.startswith('[') and clean_text.endswith(']') and not (clean_text.startswith('[[') and clean_text.endswith(']]')):
+                                    clean_text = clean_text[1:-1]  # Remove single [ and ]
+                                else:
+                                    clean_text = clean_text.strip('[]{}()<>«»|')
+                                text = f"[[{clean_text}]]"
                             updated_highlights.append((start_pos, end_pos, text, note, "yellow"))
                         else:
                             # New format: keep as-is
@@ -1957,7 +2008,93 @@ class EPUBReader(App):
             debug_log("Forced ListView background override after mounting")
         except Exception as e:
             debug_log(f"Could not override ListView background: {e}")
+
+    def perform_search(self, search_term: str) -> None:
+        """Perform search across all pages and store results."""
+        if not search_term.strip():
+            self.search_matches = []
+            self.current_search_index = -1
+            return
+            
+        self.search_term = search_term.lower()
+        self.search_matches = []
+        self.current_search_index = -1
         
+        # Search through all pages
+        for page_num, page_content in enumerate(self.pages):
+            page_lower = page_content.lower()
+            # Find all matches on this page
+            start_pos = 0
+            while True:
+                match_pos = page_lower.find(self.search_term, start_pos)
+                if match_pos == -1:
+                    break
+                    
+                # Convert byte position to line and column
+                lines = page_content[:match_pos].split('\n')
+                line_num = len(lines) - 1
+                col_num = len(lines[-1])
+                
+                self.search_matches.append((page_num, line_num, col_num, match_pos))
+                start_pos = match_pos + 1
+        
+        debug_log(f"Search for '{search_term}' found {len(self.search_matches)} matches")
+        
+        # Jump to first match if any found
+        if self.search_matches:
+            self.current_search_index = 0
+            self.navigate_to_search_match()
+
+    def next_search_match(self) -> None:
+        """Navigate to the next search match."""
+        if not self.search_matches:
+            return
+            
+        self.current_search_index = (self.current_search_index + 1) % len(self.search_matches)
+        self.navigate_to_search_match()
+
+    def prev_search_match(self) -> None:
+        """Navigate to the previous search match."""
+        if not self.search_matches:
+            return
+            
+        self.current_search_index = (self.current_search_index - 1) % len(self.search_matches)
+        self.navigate_to_search_match()
+
+    def navigate_to_search_match(self) -> None:
+        """Navigate to the current search match and position cursor."""
+        if not self.search_matches or self.current_search_index < 0:
+            return
+            
+        target_page, line_num, col_num, _ = self.search_matches[self.current_search_index]
+        
+        # Navigate to the page if needed
+        if target_page != self.current_page:
+            self.current_page = target_page
+            self.save_current_page()
+            # Use call_after_refresh to position cursor after page content updates
+            self.call_after_refresh(self._position_cursor_on_match, line_num, col_num)
+        else:
+            # Same page, position cursor immediately
+            self._position_cursor_on_match(line_num, col_num)
+
+    def _position_cursor_on_match(self, line_num: int, col_num: int) -> None:
+        """Position cursor on the search match."""
+        try:
+            text_area = self.query_one("#text-area", TextArea)
+            from textual.widgets.text_area import Selection
+            
+            # Set cursor to start of match
+            start_pos = (line_num, col_num)
+            end_pos = (line_num, col_num + len(self.search_term))
+            
+            # Create selection that highlights the search term
+            text_area.selection = Selection(start_pos, end_pos)
+            
+            debug_log(f"Positioned cursor on search match at line {line_num + 1}, col {col_num + 1}")
+        except Exception as e:
+            debug_log(f"Error positioning cursor: {e}")
+
         
 
 
