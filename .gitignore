@@ -1,8 +1,44 @@
-venv
-before_read.pkl
-bookshelf
-CLAUDE.md
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+
+# GenreJinn data files (user data should not be tracked)
+*.pkl
 log.txt
-textual
-__pycache__
-images
+*.log
+
+# User data directories (preserve structure but ignore contents)
+data/*/
+!data/.gitkeep
+
+# Legacy directories (moved to data/)
+bookshelf/
+images/
+backups/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Tree-sitter compiled files
+grammar/src/
+*.so
+*.dll
+*.dylib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

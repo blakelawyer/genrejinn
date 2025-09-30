@@ -1,7 +1,0 @@
-requests
-rich
-textual
-textual-dev
-textual-image
-textual-imageview
-tree-sitter

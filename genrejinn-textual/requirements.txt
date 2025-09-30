@@ -1,0 +1,59 @@
+# GenreJinn EPUB Reader Requirements
+# ===================================
+#
+# Install instructions:
+# Basic usage:     pip install -r requirements.txt
+# All features:    pip install -r requirements.txt[all]
+# Development:     pip install -r requirements.txt[dev]
+
+# Core Dependencies (Required)
+# -----------------------------
+textual>=0.41.0         # Terminal UI framework
+rich>=13.0.0           # Rich text and formatting
+requests>=2.25.0       # HTTP requests for image downloads
+tree-sitter>=0.20.0    # Syntax highlighting parser
+
+# Server Mode (Optional)
+# ----------------------
+# Uncomment to enable web browser access
+# textual-serve>=1.0.0
+
+# Image Support (Optional)
+# ------------------------
+# Uncomment for enhanced image display in notes
+# textual-image>=0.3.0
+# textual-imageview>=0.1.0
+# pillow>=9.0.0
+
+# Development Tools (Optional)
+# ----------------------------
+# Uncomment for development work
+# textual-dev>=1.0.0     # Textual development tools
+# pytest>=7.0.0          # Testing framework
+# pytest-asyncio>=0.21.0 # Async testing support
+# black>=22.0.0          # Code formatter
+# isort>=5.10.0          # Import sorter
+# flake8>=5.0.0          # Linting
+# mypy>=1.0.0            # Type checking
+# ipython>=8.0.0         # Enhanced REPL
+# jupyter>=1.0.0         # Notebook support
+
+# Installation Examples:
+# ----------------------
+# Basic installation:
+#   pip install textual rich requests tree-sitter
+#
+# With server mode:
+#   pip install textual rich requests tree-sitter textual-serve
+#
+# With images:
+#   pip install textual rich requests tree-sitter textual-image pillow
+#
+# Full development setup:
+#   pip install textual rich requests tree-sitter textual-serve textual-image pillow textual-dev pytest pytest-asyncio black isort flake8 mypy ipython jupyter
+#
+# Using pyproject.toml (recommended):
+#   pip install .[all]      # All optional features
+#   pip install .[server]   # Just server mode
+#   pip install .[images]   # Just image support
+#   pip install .[dev]      # Development tools
